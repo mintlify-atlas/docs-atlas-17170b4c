@@ -1,0 +1,83 @@
+{
+  "projectType": "saas",
+  "projectName": "PostgreSQL Realtime Monitor",
+  "projectDescription": "Real-time monitoring of PostgreSQL database changes using Bun, WebSocket, and React",
+  "theme": "aspen",
+  "primaryColor": "#10b981",
+  "lightColor": "#fbf0df",
+  "darkColor": "#1a1a1a",
+  "navigation": {
+    "tabs": [
+      {
+        "tab": "Documentation",
+        "groups": [
+          {
+            "group": "Get Started",
+            "pages": [
+              "introduction",
+              "quickstart",
+              "installation"
+            ]
+          },
+          {
+            "group": "Core Features",
+            "pages": [
+              "features/realtime-monitoring",
+              "features/websocket-connection",
+              "features/filtering-sorting",
+              "features/table-interface"
+            ]
+          },
+          {
+            "group": "Configuration",
+            "pages": [
+              "configuration/database-setup",
+              "configuration/environment",
+              "configuration/docker"
+            ]
+          },
+          {
+            "group": "Deployment",
+            "pages": [
+              "deployment/local-development",
+              "deployment/production"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "API Reference",
+        "groups": [
+          {
+            "group": "Endpoints",
+            "pages": [
+              "api/rest-endpoints",
+              "api/websocket"
+            ]
+          },
+          {
+            "group": "Components",
+            "pages": [
+              "api/components/app",
+              "api/components/changes-table"
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "keyFeatures": [
+    "Real-time monitoring of PostgreSQL changes (INSERT, UPDATE, DELETE)",
+    "WebSocket server with automatic reconnection",
+    "Sortable and filterable data table",
+    "Modern dark theme UI with live connection status",
+    "Built with Bun for high performance",
+    "Hot Module Reloading for fast development"
+  ],
+  "publicApiSurface": [
+    "GET /api/changes - Retrieve all accumulated database changes",
+    "WS /ws - WebSocket endpoint for real-time updates",
+    "App component - Main React application component",
+    "ChangesTable component - Table component with sorting and filtering"
+  ]
+}
