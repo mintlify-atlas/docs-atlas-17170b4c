@@ -1,0 +1,469 @@
+---
+title: 'Docker Setup'
+description: 'Run PostgreSQL with logical replication using Docker Compose'
+---
+
+## Overview
+
+The project includes a `docker-compose.yml` file that configures PostgreSQL 16 with logical replication enabled and automatically initializes the required publication.
+
+## Docker Compose Configuration
+
+The complete Docker Compose configuration:
+
+```yaml docker-compose.yml
+version: "3.9"
+
+services:
+  db:
+    image: postgres:16-alpine
+    container_name: postgres-realtime
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: appdb
+      POSTGRES_USER: appuser
+      POSTGRES_PASSWORD: secret
+    ports:
+      - "5432:5432"
+    command: >
+      postgres
+        -c wal_level=logical
+        -c max_wal_senders=10
+        -c max_replication_slots=10
+        -c max_connections=100
+    volumes:
+      - db-data:/var/lib/postgresql/data
+      # init.sql runs when container starts (only if volume is empty)
+      - ./init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+
+volumes:
+  db-data:
+```
+
+## PostgreSQL Image and Version
+
+### Image Details
+
+| Component | Value | Description |
+|-----------|-------|-------------|
+| Image | `postgres:16-alpine` | Official PostgreSQL image, Alpine Linux variant |
+| Version | PostgreSQL 16 | Latest major version |
+| Base OS | Alpine Linux | Minimal Linux distribution for smaller image size |
+
+<Note>
+The Alpine variant is used for a smaller Docker image size (~80MB vs ~350MB for the standard Debian-based image). It's functionally identical for our use case.
+</Note>
+
+### Container Configuration
+
+| Setting | Value | Description |
+|---------|-------|-------------|
+| `container_name` | `postgres-realtime` | Friendly name for the container |
+| `restart` | `unless-stopped` | Automatically restart container unless manually stopped |
+
+## Environment Variables in Docker
+
+The Docker Compose file configures PostgreSQL using environment variables:
+
+```yaml docker-compose.yml
+environment:
+  POSTGRES_DB: appdb
+  POSTGRES_USER: appuser
+  POSTGRES_PASSWORD: secret
+```
+
+### Environment Variables Explained
+
+| Variable | Value | Description |
+|----------|-------|-------------|
+| `POSTGRES_DB` | `appdb` | Name of the database to create on first run |
+| `POSTGRES_USER` | `appuser` | PostgreSQL username (superuser) |
+| `POSTGRES_PASSWORD` | `secret` | Password for the PostgreSQL user |
+
+<Warning>
+These credentials must match the values in `db.ts`. The default password `secret` is only suitable for development.
+</Warning>
+
+### Matching Application Configuration
+
+These Docker environment variables correspond to `db.ts` constants:
+
+<CodeGroup>
+```yaml docker-compose.yml
+POSTGRES_DB: appdb
+POSTGRES_USER: appuser
+POSTGRES_PASSWORD: secret
+```
+
+```typescript db.ts
+const DB_NAME = 'appdb'
+const DB_USER = 'appuser'
+const DB_PASSWORD = 'secret'
+```
+</CodeGroup>
+
+## PostgreSQL Configuration Parameters
+
+The `command` section passes PostgreSQL configuration flags:
+
+```yaml docker-compose.yml
+command: >
+  postgres
+    -c wal_level=logical
+    -c max_wal_senders=10
+    -c max_replication_slots=10
+    -c max_connections=100
+```
+
+### Parameters Explained
+
+| Parameter | Value | Purpose |
+|-----------|-------|----------|
+| `wal_level` | `logical` | **Required** for logical replication and change data capture |
+| `max_wal_senders` | `10` | Maximum concurrent replication connections |
+| `max_replication_slots` | `10` | Maximum replication slots for subscribers |
+| `max_connections` | `100` | Maximum total database connections |
+
+<Note>
+The `wal_level=logical` setting is critical for real-time monitoring. Without it, the application cannot subscribe to database changes.
+</Note>
+
+## Volume Mounts and Persistence
+
+Two volumes are configured:
+
+### 1. Data Volume (Persistent Storage)
+
+```yaml docker-compose.yml
+volumes:
+  - db-data:/var/lib/postgresql/data
+```
+
+- **Purpose:** Persists database data across container restarts
+- **Type:** Named Docker volume
+- **Location:** Managed by Docker (typically `/var/lib/docker/volumes/`)
+- **Behavior:** Data survives container deletion unless volume is explicitly removed
+
+### 2. Initialization Script (Read-Only Mount)
+
+```yaml docker-compose.yml
+volumes:
+  - ./init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+```
+
+- **Purpose:** Automatically creates the `alltables` publication on first run
+- **Type:** Bind mount (`:ro` = read-only)
+- **Source:** `init.sql` in the project root
+- **Behavior:** Runs only when volume is empty (first container start)
+
+<Warning>
+The `init.sql` script only runs if the database is being initialized for the first time. If you modify `init.sql` after the initial setup, you must delete the volume and recreate the container.
+</Warning>
+
+### Initialization Script Content
+
+The `init.sql` file creates the required publication:
+
+```sql init.sql
+CREATE PUBLICATION alltables FOR ALL TABLES;
+```
+
+This publication is referenced in `db.ts`:
+
+```typescript db.ts
+export const sql = postgres({
+    // ... connection params
+    publications: 'alltables', // <- Matches publication name
+})
+```
+
+## Port Mapping
+
+The container exposes PostgreSQL on the host machine:
+
+```yaml docker-compose.yml
+ports:
+  - "5432:5432"
+```
+
+| Host Port | Container Port | Description |
+|-----------|----------------|-------------|
+| `5432` | `5432` | Standard PostgreSQL port |
+
+<Note>
+With this mapping, you can connect to PostgreSQL at `localhost:5432` from your host machine, making it accessible to the Bun application running locally.
+</Note>
+
+### Changing the Host Port
+
+If port 5432 is already in use on your host:
+
+```yaml docker-compose.yml
+ports:
+  - "5433:5432"  # Expose on host port 5433 instead
+```
+
+Then update `db.ts`:
+
+```typescript db.ts
+const DB_PORT = 5433  // Changed from 5432
+```
+
+## Starting and Stopping Containers
+
+### Starting PostgreSQL
+
+Start the container in detached mode:
+
+```bash
+docker-compose up -d
+```
+
+You should see:
+
+```
+[+] Running 2/2
+ ✔ Network postgres-realtime-monitor_default  Created
+ ✔ Container postgres-realtime                Started
+```
+
+### Checking Container Status
+
+Verify the container is running:
+
+```bash
+docker ps
+```
+
+Expected output:
+
+```
+CONTAINER ID   IMAGE                 STATUS         PORTS                    NAMES
+abc123def456   postgres:16-alpine    Up 5 seconds   0.0.0.0:5432->5432/tcp   postgres-realtime
+```
+
+### Viewing Logs
+
+View PostgreSQL logs to verify startup:
+
+```bash
+docker-compose logs -f db
+```
+
+Look for successful initialization messages:
+
+```
+postgres-realtime | PostgreSQL init process complete; ready for start up.
+postgres-realtime | LOG:  database system is ready to accept connections
+```
+
+<Note>
+The first time you start the container, you should also see messages about creating the database and running `init.sql`.
+</Note>
+
+### Stopping the Container
+
+Stop the container:
+
+```bash
+docker-compose down
+```
+
+This stops and removes the container but **preserves data** in the `db-data` volume.
+
+### Removing Data Volume
+
+To completely reset and remove all data:
+
+```bash
+docker-compose down -v
+```
+
+<Warning>
+The `-v` flag deletes the database volume. All data will be lost. Use with caution!
+</Warning>
+
+## Accessing PostgreSQL Inside the Container
+
+There are multiple ways to connect to the PostgreSQL instance:
+
+### 1. From the Host Machine
+
+Use any PostgreSQL client with the exposed port:
+
+```bash
+psql -h localhost -p 5432 -U appuser -d appdb
+```
+
+When prompted, enter the password: `secret`
+
+### 2. Using Docker Exec
+
+Execute psql inside the running container:
+
+```bash
+docker exec -it postgres-realtime psql -U appuser -d appdb
+```
+
+This connects directly without needing a password.
+
+### 3. Using Docker Compose Exec
+
+Alternatively:
+
+```bash
+docker-compose exec db psql -U appuser -d appdb
+```
+
+### Example Session
+
+Once connected, you can interact with the database:
+
+```sql
+-- List all tables
+\dt
+
+-- Check publications
+SELECT * FROM pg_publication;
+
+-- Verify logical replication settings
+SHOW wal_level;
+
+-- Create a test table
+CREATE TABLE test (id SERIAL PRIMARY KEY, message TEXT);
+
+-- Insert test data
+INSERT INTO test (message) VALUES ('Hello from PostgreSQL');
+```
+
+## Troubleshooting
+
+### Container Won't Start
+
+Check logs for errors:
+
+```bash
+docker-compose logs db
+```
+
+Common issues:
+
+**Port already in use:**
+```
+Error: bind: address already in use
+```
+→ Change the host port in docker-compose.yml
+
+**Permission denied:**
+```
+Error: could not open directory "/var/lib/postgresql/data"
+```
+→ Docker needs permission to create volumes. Check Docker daemon permissions.
+
+### Application Can't Connect
+
+**Verify container is running:**
+```bash
+docker ps | grep postgres-realtime
+```
+
+**Test connection from host:**
+```bash
+psql -h localhost -p 5432 -U appuser -d appdb
+```
+
+**Check db.ts configuration:**
+Ensure `DB_HOST`, `DB_PORT`, `DB_NAME`, `DB_USER`, and `DB_PASSWORD` match Docker Compose environment variables.
+
+### Publication Not Found
+
+If the application reports a missing publication:
+
+```bash
+# Connect to PostgreSQL
+docker exec -it postgres-realtime psql -U appuser -d appdb
+
+# Check if publication exists
+SELECT * FROM pg_publication WHERE pubname = 'alltables';
+
+# If not found, create it manually
+CREATE PUBLICATION alltables FOR ALL TABLES;
+```
+
+<Note>
+The `init.sql` script only runs on first initialization. If the volume already existed, the publication may not have been created.
+</Note>
+
+### Reset Everything
+
+To start fresh:
+
+```bash
+# Stop and remove container + volumes
+docker-compose down -v
+
+# Start again (will reinitialize database)
+docker-compose up -d
+
+# Verify publication was created
+docker exec -it postgres-realtime psql -U appuser -d appdb -c "\dRp"
+```
+
+## Production Considerations
+
+<Warning>
+The provided Docker Compose configuration is optimized for development. For production deployments, consider the following enhancements.
+</Warning>
+
+### Security Improvements
+
+1. **Use strong passwords:**
+   ```yaml
+   environment:
+     POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}  # Load from .env file
+   ```
+
+2. **Don't expose port to 0.0.0.0:**
+   ```yaml
+   ports:
+     - "127.0.0.1:5432:5432"  # Only accessible from localhost
+   ```
+
+3. **Use secrets management:**
+   - Docker Swarm secrets
+   - Kubernetes secrets
+   - External secrets managers (Vault, AWS Secrets Manager)
+
+### Performance Tuning
+
+Adjust PostgreSQL parameters for production workloads:
+
+```yaml
+command: >
+  postgres
+    -c wal_level=logical
+    -c max_wal_senders=10
+    -c max_replication_slots=10
+    -c max_connections=200          # Increased
+    -c shared_buffers=256MB         # Added
+    -c effective_cache_size=1GB     # Added
+    -c work_mem=16MB                # Added
+```
+
+### Data Backup
+
+Implement regular backups:
+
+```bash
+# Manual backup
+docker exec postgres-realtime pg_dump -U appuser appdb > backup.sql
+
+# Restore from backup
+docker exec -i postgres-realtime psql -U appuser appdb < backup.sql
+```
+
+## Next Steps
+
+- [Configure environment variables](/configuration/environment) to match your Docker setup
+- [Test the database connection](/configuration/database-setup#testing-the-connection)
+- Start the application with `bun run dev` and verify real-time monitoring works

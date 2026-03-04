@@ -1,0 +1,375 @@
+---
+title: "Filtering & Sorting"
+description: "Client-side data manipulation with per-column filters and multi-column sorting"
+---
+
+## Overview
+
+The ChangesTable component provides powerful client-side filtering and sorting capabilities. Users can filter data by any column and sort by multiple columns with direction toggles.
+
+## Per-Column Text Filters
+
+Each column has its own filter input that performs case-insensitive substring matching:
+
+```typescript src/components/ChangesTable.tsx
+const [filters, setFilters] = useState<Record<string, string>>({});
+
+// Function to update a filter
+const handleFilterChange = (column: string, value: string) => {
+  setFilters((prev) => ({
+    ...prev,
+    [column]: value,
+  }));
+};
+```
+
+### Filter UI
+
+Filter inputs appear in a dedicated row below column headers:
+
+```typescript src/components/ChangesTable.tsx
+<tr
+  style={{
+    backgroundColor: "#151515",
+    borderBottom: "1px solid #333",
+  }}
+>
+  {columns.map((column) => (
+    <td
+      key={column}
+      style={{
+        padding: "0.5rem",
+      }}
+    >
+      <input
+        type="text"
+        placeholder={`Filter ${column}...`}
+        value={filters[column] || ""}
+        onChange={(e) => handleFilterChange(column, e.target.value)}
+        style={{
+          width: "100%",
+          padding: "0.5rem",
+          backgroundColor: "#1a1a1a",
+          border: "1px solid #333",
+          borderRadius: "4px",
+          color: "#fbf0df",
+          fontSize: "0.85rem",
+          outline: "none",
+          transition: "border-color 0.2s",
+        }}
+        onFocus={(e) => {
+          e.currentTarget.style.borderColor = "#f3d5a3";
+        }}
+        onBlur={(e) => {
+          e.currentTarget.style.borderColor = "#333";
+        }}
+      />
+    </td>
+  ))}
+</tr>
+```
+
+## Filter Matching Logic
+
+Filters use case-insensitive substring matching with null value handling:
+
+```typescript src/components/ChangesTable.tsx
+// Function to filter changes
+const filteredChanges = useMemo(() => {
+  const filterEntries = Object.entries(filters).filter(([_, value]) => value.trim() !== "");
+
+  if (filterEntries.length === 0) {
+    return changes;
+  }
+
+  return changes.filter((change) => {
+    return filterEntries.every(([column, filterValue]) => {
+      const value = change[column];
+      if (value == null) {
+        return filterValue.toLowerCase() === "null" || filterValue.toLowerCase() === "";
+      }
+      return String(value).toLowerCase().includes(filterValue.toLowerCase());
+    });
+  });
+}, [changes, filters]);
+```
+
+<Info>
+  All filters must match for a row to be displayed (AND logic). Type "null" to filter for null values.
+</Info>
+
+### Filter Bar
+
+When filters are active, a filter bar appears showing the count and clear button:
+
+```typescript src/components/ChangesTable.tsx
+// Count how many filters are active
+const activeFiltersCount = Object.values(filters).filter((v) => v.trim() !== "").length;
+
+// Function to clear all filters
+const clearFilters = () => {
+  setFilters({});
+};
+
+{activeFiltersCount > 0 && (
+  <div
+    style={{
+      padding: "0.75rem 1rem",
+      backgroundColor: "#0f0f0f",
+      borderBottom: "1px solid #333",
+      display: "flex",
+      alignItems: "center",
+      gap: "0.5rem",
+      flexWrap: "wrap",
+    }}
+  >
+    <span style={{ color: "#fbf0df", fontSize: "0.85rem", fontWeight: "600" }}>
+      Active filters: {activeFiltersCount}
+    </span>
+    <button
+      onClick={clearFilters}
+      style={{
+        padding: "0.25rem 0.75rem",
+        backgroundColor: "#ef4444",
+        color: "#fff",
+        border: "none",
+        borderRadius: "6px",
+        cursor: "pointer",
+        fontSize: "0.75rem",
+        fontWeight: "600",
+        transition: "background-color 0.2s",
+      }}
+    >
+      Clear filters
+    </button>
+  </div>
+)}
+```
+
+## Multi-Column Sorting
+
+Click any column header to sort. Click again to reverse direction, and a third time to clear sorting.
+
+### Sort State Management
+
+```typescript src/components/ChangesTable.tsx
+const [sortColumn, setSortColumn] = useState<string | null>(null);
+const [sortDirection, setSortDirection] = useState<SortDirection>(null);
+
+type SortDirection = "asc" | "desc" | null;
+```
+
+### Sort Toggle Logic
+
+```typescript src/components/ChangesTable.tsx
+// Function to handle header click
+const handleSort = (column: string) => {
+  if (sortColumn === column) {
+    // If already sorted by this column, change direction
+    if (sortDirection === "asc") {
+      setSortDirection("desc");
+    } else if (sortDirection === "desc") {
+      setSortColumn(null);
+      setSortDirection(null);
+    }
+  } else {
+    // New column, sort ascending
+    setSortColumn(column);
+    setSortDirection("asc");
+  }
+};
+```
+
+<Steps>
+  <Step title="First Click">
+    Sort ascending (A→Z, 0→9, oldest→newest)
+  </Step>
+  <Step title="Second Click">
+    Sort descending (Z→A, 9→0, newest→oldest)
+  </Step>
+  <Step title="Third Click">
+    Clear sorting, return to original order
+  </Step>
+</Steps>
+
+## Sort Comparisons
+
+The sort function intelligently handles different data types:
+
+```typescript src/components/ChangesTable.tsx
+// Function to sort changes (after filtering)
+const sortedChanges = useMemo(() => {
+  if (!sortColumn || !sortDirection) {
+    return filteredChanges;
+  }
+
+  return [...filteredChanges].sort((a, b) => {
+    const aValue = a[sortColumn];
+    const bValue = b[sortColumn];
+
+    // Handle null/undefined values
+    if (aValue == null && bValue == null) return 0;
+    if (aValue == null) return 1;
+    if (bValue == null) return -1;
+
+    // Compare values
+    let comparison = 0;
+    if (typeof aValue === "number" && typeof bValue === "number") {
+      comparison = aValue - bValue;
+    } else if (aValue instanceof Date && bValue instanceof Date) {
+      comparison = aValue.getTime() - bValue.getTime();
+    } else {
+      // Try to parse as date (ISO format)
+      const aDate = typeof aValue === "string" ? new Date(aValue) : null;
+      const bDate = typeof bValue === "string" ? new Date(bValue) : null;
+
+      if (aDate && bDate && !isNaN(aDate.getTime()) && !isNaN(bDate.getTime())) {
+        comparison = aDate.getTime() - bDate.getTime();
+      } else {
+        // String comparison
+        comparison = String(aValue).localeCompare(String(bValue));
+      }
+    }
+
+    return sortDirection === "asc" ? comparison : -comparison;
+  });
+}, [filteredChanges, sortColumn, sortDirection]);
+```
+
+### Comparison Types
+
+<AccordionGroup>
+  <Accordion title="Numbers">
+    Direct numeric subtraction:
+    ```typescript
+    comparison = aValue - bValue;
+    ```
+  </Accordion>
+  
+  <Accordion title="Dates">
+    Compare timestamps:
+    ```typescript
+    comparison = aValue.getTime() - bValue.getTime();
+    ```
+    
+    Also attempts to parse ISO date strings:
+    ```typescript
+    const aDate = new Date(aValue);
+    const bDate = new Date(bValue);
+    if (!isNaN(aDate.getTime()) && !isNaN(bDate.getTime())) {
+      comparison = aDate.getTime() - bDate.getTime();
+    }
+    ```
+  </Accordion>
+  
+  <Accordion title="Strings">
+    Locale-aware comparison:
+    ```typescript
+    comparison = String(aValue).localeCompare(String(bValue));
+    ```
+  </Accordion>
+  
+  <Accordion title="Null Values">
+    Null values always sort to the end:
+    ```typescript
+    if (aValue == null && bValue == null) return 0;
+    if (aValue == null) return 1;  // a goes after b
+    if (bValue == null) return -1; // b goes after a
+    ```
+  </Accordion>
+</AccordionGroup>
+
+## Sort Indicators
+
+Column headers display sort state with visual indicators:
+
+```typescript src/components/ChangesTable.tsx
+<div
+  style={{
+    display: "flex",
+    alignItems: "center",
+    gap: "0.5rem",
+  }}
+>
+  <span>{column}</span>
+  {isSorted && (
+    <span style={{ fontSize: "0.8rem", color: "#f3d5a3" }}>
+      {isAsc ? "↑" : "↓"}
+    </span>
+  )}
+  {!isSorted && (
+    <span
+      style={{
+        fontSize: "0.7rem",
+        color: "#64748b",
+        opacity: 0.5,
+      }}
+    >
+      ↕
+    </span>
+  )}
+</div>
+```
+
+<CardGroup cols={3}>
+  <Card title="↑" icon="arrow-up">
+    Ascending sort active
+  </Card>
+  <Card title="↓" icon="arrow-down">
+    Descending sort active
+  </Card>
+  <Card title="↕" icon="arrows-up-down">
+    No sort (clickable)
+  </Card>
+</CardGroup>
+
+## Performance Optimization
+
+Both filtering and sorting use `useMemo` to avoid unnecessary recalculations:
+
+```typescript src/components/ChangesTable.tsx
+// Filters recalculate only when changes or filters change
+const filteredChanges = useMemo(() => {
+  // ... filter logic
+}, [changes, filters]);
+
+// Sorts recalculate only when filtered data or sort state changes
+const sortedChanges = useMemo(() => {
+  // ... sort logic
+}, [filteredChanges, sortColumn, sortDirection]);
+```
+
+<Note>
+  Filtering happens first, then sorting is applied to the filtered results. This ensures optimal performance and expected behavior.
+</Note>
+
+## Example Usage
+
+<Steps>
+  <Step title="Filter by Operation">
+    Type "INSERT" in the operation column filter to show only insertions
+  </Step>
+  <Step title="Filter by Table">
+    Type "users" in the table column to show changes from the users table
+  </Step>
+  <Step title="Sort by ID">
+    Click the id column header to sort changes by ID ascending
+  </Step>
+  <Step title="Reverse Sort">
+    Click again to sort descending (newest IDs first)
+  </Step>
+  <Step title="Clear All">
+    Click "Clear filters" button or click the sorted column header again
+  </Step>
+</Steps>
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Table Interface" icon="table" href="/features/table-interface">
+    Learn about the React table component design
+  </Card>
+  <Card title="WebSocket Connection" icon="signal" href="/features/websocket-connection">
+    Understand real-time data flow
+  </Card>
+</CardGroup>

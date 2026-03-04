@@ -1,0 +1,337 @@
+---
+title: "WebSocket Connection"
+description: "Real-time client-server communication using Bun's WebSocket support"
+---
+
+## Overview
+
+The application uses **WebSockets** to push database changes from the server to connected clients in real-time. Bun's built-in WebSocket support provides a high-performance, low-latency communication channel.
+
+## Bun's Built-in WebSocket Support
+
+Bun includes native WebSocket handling in its HTTP server, eliminating the need for external libraries:
+
+```typescript src/index.ts
+const server = serve({
+  port: 3000,
+  async fetch(req, server) {
+    const url = new URL(req.url);
+
+    // Upgrade a WebSocket
+    if (url.pathname === "/ws") {
+      const success = server.upgrade(req);
+      if (success) {
+        return undefined;
+      }
+      return new Response("WebSocket upgrade failed", { status: 500 });
+    }
+
+    // ... other routes
+  },
+
+  websocket: {
+    message(ws: any, message: string | Buffer) {
+      // Clients can send messages if needed
+      console.log("Message received:", message);
+    },
+    open(ws: any) {
+      clients.add(ws);
+      console.log("WebSocket client connected. Total:", clients.size);
+
+      // Send all existing changes to the new client
+      if (allChanges.length > 0) {
+        ws.send(
+          JSON.stringify({
+            type: "initial",
+            data: allChanges,
+          })
+        );
+      }
+    },
+    close(ws: any) {
+      clients.delete(ws);
+      console.log("WebSocket client disconnected. Total:", clients.size);
+    },
+  },
+});
+```
+
+## Connection Lifecycle
+
+### 1. Connection Open
+
+When a client connects:
+1. The WebSocket is added to the `clients` Set
+2. The total client count is logged
+3. All historical changes are sent as an `initial` message
+
+```typescript src/index.ts
+open(ws: any) {
+  clients.add(ws);
+  console.log("WebSocket client connected. Total:", clients.size);
+
+  // Send all existing changes to the new client
+  if (allChanges.length > 0) {
+    ws.send(
+      JSON.stringify({
+        type: "initial",
+        data: allChanges,
+      })
+    );
+  }
+}
+```
+
+<Info>
+  The initial data sync ensures new clients see all historical changes immediately upon connecting.
+</Info>
+
+### 2. Message Handling
+
+The server can receive messages from clients (currently logged for debugging):
+
+```typescript src/index.ts
+message(ws: any, message: string | Buffer) {
+  console.log("Message received:", message);
+}
+```
+
+### 3. Connection Close
+
+When a client disconnects, it's removed from the active clients:
+
+```typescript src/index.ts
+close(ws: any) {
+  clients.delete(ws);
+  console.log("WebSocket client disconnected. Total:", clients.size);
+}
+```
+
+## Broadcasting to Multiple Clients
+
+The server maintains a Set of all connected clients and broadcasts changes to each:
+
+```typescript src/index.ts
+// Connected WebSocket clients
+const clients = new Set<any>();
+
+// Function to broadcast to all clients
+function broadcast(data: any) {
+  const message = JSON.stringify(data);
+  clients.forEach((client: any) => {
+    if (client.readyState === 1) { // OPEN
+      client.send(message);
+    }
+  });
+}
+```
+
+<Note>
+  The broadcast function checks `readyState === 1` to ensure the connection is OPEN before sending.
+</Note>
+
+### Message Format
+
+Broadcast messages follow this structure:
+
+```typescript
+{
+  type: "change",
+  data: [
+    {
+      operation: "INSERT",
+      table: "public.users",
+      id: 42,
+      name: "Alice"
+    }
+  ],
+  total: 15
+}
+```
+
+## Client-Side Connection (React)
+
+The React frontend establishes and maintains the WebSocket connection:
+
+```typescript src/App.tsx
+const connect = () => {
+  // Connect to WebSocket
+  ws = new WebSocket("ws://localhost:3000/ws");
+  wsRef.current = ws;
+
+  ws.onopen = () => {
+    if (isMounted) {
+      console.log("Connected to WebSocket server");
+      setConnected(true);
+    }
+  };
+
+  ws.onmessage = (event) => {
+    if (!isMounted) return;
+    
+    try {
+      const message: WebSocketMessage = JSON.parse(event.data);
+
+      if (message.type === "initial") {
+        // Initial load of all changes
+        setChanges(message.data);
+        setTotalChanges(message.data.length);
+      } else if (message.type === "change") {
+        // New changes - add to state
+        setChanges((prev) => [...prev, ...message.data]);
+        if (message.total) {
+          setTotalChanges(message.total);
+        }
+      }
+    } catch (error) {
+      console.error("Error parsing WebSocket message:", error);
+    }
+  };
+
+  ws.onerror = (error) => {
+    if (isMounted) {
+      console.error("WebSocket error:", error);
+      setConnected(false);
+    }
+  };
+
+  ws.onclose = (event) => {
+    if (!isMounted) return;
+    
+    console.log("Disconnected from WebSocket server", event.code, event.reason);
+    setConnected(false);
+    wsRef.current = null;
+
+    // Try to reconnect after 3 seconds
+    if (event.code !== 1000 && isMounted) {
+      reconnectTimeout = setTimeout(() => {
+        if (isMounted && (!wsRef.current || wsRef.current.readyState === WebSocket.CLOSED)) {
+          connect();
+        }
+      }, 3000);
+    }
+  };
+};
+```
+
+## Automatic Reconnection Logic
+
+The client implements robust reconnection:
+
+1. **Detect Disconnection**: `onclose` event triggers
+2. **Check Close Code**: Normal closure (1000) doesn't reconnect
+3. **Wait Period**: 3-second delay before attempting reconnect
+4. **Verify State**: Ensures no duplicate connections exist
+5. **Reconnect**: Calls `connect()` to establish new connection
+
+<CodeGroup>
+```typescript Reconnection Logic
+ws.onclose = (event) => {
+  if (!isMounted) return;
+  
+  console.log("Disconnected from WebSocket server", event.code, event.reason);
+  setConnected(false);
+  wsRef.current = null;
+
+  // Try to reconnect after 3 seconds only if it wasn't an intentional close
+  if (event.code !== 1000 && isMounted) {
+    reconnectTimeout = setTimeout(() => {
+      if (isMounted && (!wsRef.current || wsRef.current.readyState === WebSocket.CLOSED)) {
+        connect();
+      }
+    }, 3000);
+  }
+};
+```
+
+```typescript Duplicate Prevention
+const connect = () => {
+  // Avoid creating multiple connections
+  if (wsRef.current?.readyState === WebSocket.OPEN || 
+      wsRef.current?.readyState === WebSocket.CONNECTING) {
+    return;
+  }
+
+  // Clean up previous connection if it exists
+  if (wsRef.current) {
+    try {
+      wsRef.current.close();
+    } catch (e) {
+      // Ignore errors when closing
+    }
+  }
+
+  // ... create new connection
+};
+```
+</CodeGroup>
+
+## Initial Data Sync
+
+When a client connects, the server immediately sends all accumulated changes:
+
+```typescript src/index.ts
+open(ws: any) {
+  clients.add(ws);
+  console.log("WebSocket client connected. Total:", clients.size);
+
+  // Send all existing changes to the new client
+  if (allChanges.length > 0) {
+    ws.send(
+      JSON.stringify({
+        type: "initial",
+        data: allChanges,
+      })
+    );
+  }
+}
+```
+
+The client handles this specially:
+
+```typescript src/App.tsx
+if (message.type === "initial") {
+  // Initial load of all changes
+  setChanges(message.data);
+  setTotalChanges(message.data.length);
+} else if (message.type === "change") {
+  // New changes - add to state
+  setChanges((prev) => [...prev, ...message.data]);
+  if (message.total) {
+    setTotalChanges(message.total);
+  }
+}
+```
+
+<Warning>
+  Initial sync can be large if many changes have occurred. Consider pagination for production use.
+</Warning>
+
+## Connection Status Indicator
+
+The UI displays real-time connection status:
+
+```typescript src/App.tsx
+<div
+  style={{
+    width: "10px",
+    height: "10px",
+    borderRadius: "50%",
+    backgroundColor: connected ? "#10b981" : "#ef4444",
+    boxShadow: connected ? "0 0 10px #10b981" : "none",
+    transition: "all 0.3s",
+  }}
+/>
+<span>{connected ? "Connected" : "Disconnected"}</span>
+```
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Real-time Monitoring" icon="database" href="/features/realtime-monitoring">
+    Learn about PostgreSQL logical replication
+  </Card>
+  <Card title="Filtering & Sorting" icon="filter" href="/features/filtering-sorting">
+    Discover client-side data manipulation
+  </Card>
+</CardGroup>

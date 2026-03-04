@@ -1,0 +1,164 @@
+---
+title: 'REST API'
+description: 'HTTP REST API endpoints for accessing PostgreSQL changes'
+---
+
+## Overview
+
+The REST API provides a simple HTTP interface to retrieve all accumulated database changes that have been captured by the monitor. This is useful for initial data loading, debugging, or integrating with external systems.
+
+## GET /api/changes
+
+Retrieves all accumulated database changes that have been captured since the server started.
+
+### Endpoint
+
+```
+GET http://localhost:3000/api/changes
+```
+
+### Response Format
+
+Returns a JSON array of change objects. Each change object contains:
+
+<ResponseField name="operation" type="string" required>
+  The database operation type: `INSERT`, `UPDATE`, or `DELETE`
+</ResponseField>
+
+<ResponseField name="table" type="string" required>
+  The fully-qualified table name in the format `schema.table` (e.g., `public.users`)
+</ResponseField>
+
+<ResponseField name="[column]" type="any">
+  Additional fields represent the column data from the affected row. The exact fields depend on your table schema.
+</ResponseField>
+
+### Example Request
+
+<CodeGroup>
+
+```bash curl
+curl http://localhost:3000/api/changes
+```
+
+```javascript fetch
+const response = await fetch('http://localhost:3000/api/changes');
+const changes = await response.json();
+console.log(changes);
+```
+
+```python Python
+import requests
+
+response = requests.get('http://localhost:3000/api/changes')
+changes = response.json()
+print(changes)
+```
+
+</CodeGroup>
+
+### Example Response
+
+```json
+[
+  {
+    "operation": "INSERT",
+    "table": "public.users",
+    "id": 1,
+    "name": "John Doe",
+    "email": "john@example.com",
+    "created_at": "2026-03-04T10:30:00Z"
+  },
+  {
+    "operation": "UPDATE",
+    "table": "public.users",
+    "id": 1,
+    "name": "John Smith",
+    "email": "john@example.com",
+    "created_at": "2026-03-04T10:30:00Z"
+  },
+  {
+    "operation": "DELETE",
+    "table": "public.products",
+    "id": 42,
+    "name": "Widget",
+    "price": 19.99
+  }
+]
+```
+
+## Implementation Details
+
+The endpoint is implemented in `src/index.ts:36-38`:
+
+```typescript
+// API endpoint
+if (url.pathname === "/api/changes") {
+  return Response.json(allChanges);
+}
+```
+
+Changes are stored in an in-memory array (`allChanges`) that accumulates all database changes since the server started. This means:
+
+- **Persistent across WebSocket connections**: All changes remain available even if clients disconnect
+- **Not persisted to disk**: Changes are lost when the server restarts
+- **Growing size**: The array grows continuously, so memory usage increases over time
+
+## Use Cases
+
+### Initial Data Loading
+
+When a client application starts, it can fetch all historical changes before establishing a WebSocket connection:
+
+```javascript
+// Fetch historical data
+const response = await fetch('http://localhost:3000/api/changes');
+const historicalChanges = await response.json();
+
+// Then connect to WebSocket for real-time updates
+const ws = new WebSocket('ws://localhost:3000/ws');
+```
+
+### Debugging and Monitoring
+
+Quickly inspect all changes from the command line:
+
+```bash
+curl http://localhost:3000/api/changes | jq .
+```
+
+### Integration with External Systems
+
+Poll the endpoint periodically to sync changes with external systems:
+
+```javascript
+setInterval(async () => {
+  const response = await fetch('http://localhost:3000/api/changes');
+  const changes = await response.json();
+  await syncToExternalSystem(changes);
+}, 60000); // Every minute
+```
+
+### Backup and Auditing
+
+Export changes for backup or audit purposes:
+
+```bash
+curl http://localhost:3000/api/changes > changes-backup.json
+```
+
+## Response Headers
+
+The endpoint returns standard JSON response headers:
+
+```
+Content-Type: application/json
+```
+
+## Error Handling
+
+The endpoint always returns a 200 OK status with a JSON array. If no changes have been captured, it returns an empty array:
+
+```json
+[]
+```

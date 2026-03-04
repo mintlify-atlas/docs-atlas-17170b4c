@@ -1,0 +1,419 @@
+---
+title: "Table Interface"
+description: "Dynamic React table component with operation color coding and dark theme"
+---
+
+## Overview
+
+The ChangesTable component is a fully-featured React table that displays database changes in real-time. It dynamically adapts to the data structure and provides visual feedback for different operation types.
+
+## Dynamic Columns
+
+Columns are automatically generated from all unique keys found in the data:
+
+```typescript src/components/ChangesTable.tsx
+// Get all unique columns from all changes
+const columns = useMemo(() => {
+  const columnSet = new Set<string>();
+  changes.forEach((change) => {
+    Object.keys(change).forEach((key) => columnSet.add(key));
+  });
+  return Array.from(columnSet);
+}, [changes]);
+```
+
+<Info>
+  This approach ensures the table automatically adapts to any database schema without configuration.
+</Info>
+
+### Column Rendering
+
+```typescript src/components/ChangesTable.tsx
+<thead>
+  <tr
+    style={{
+      backgroundColor: "#0f0f0f",
+      borderBottom: "2px solid #fbf0df",
+    }}
+  >
+    {columns.map((column) => (
+      <th
+        key={column}
+        onClick={() => handleSort(column)}
+        style={{
+          padding: "1rem",
+          textAlign: "left",
+          fontWeight: "600",
+          color: "#fbf0df",
+          textTransform: "capitalize",
+          whiteSpace: "nowrap",
+          cursor: "pointer",
+          userSelect: "none",
+          transition: "background-color 0.2s",
+        }}
+      >
+        {/* ... column content */}
+      </th>
+    ))}
+  </tr>
+</thead>
+```
+
+## Operation Color Coding
+
+Each database operation is visually distinguished by color:
+
+```typescript src/components/ChangesTable.tsx
+// Function to get color based on operation
+const getOperationColor = (operation: string) => {
+  switch (operation.toUpperCase()) {
+    case "INSERT":
+      return "#10b981"; // green
+    case "UPDATE":
+      return "#3b82f6"; // blue
+    case "DELETE":
+      return "#ef4444"; // red
+    default:
+      return "#6b7280"; // gray
+  }
+};
+```
+
+<CardGroup cols={3}>
+  <Card title="INSERT" icon="plus" color="#10b981">
+    Green badge for new rows
+  </Card>
+  <Card title="UPDATE" icon="pen" color="#3b82f6">
+    Blue badge for modifications
+  </Card>
+  <Card title="DELETE" icon="trash" color="#ef4444">
+    Red badge for deletions
+  </Card>
+</CardGroup>
+
+### Operation Badge Rendering
+
+```typescript src/components/ChangesTable.tsx
+{columns.map((column) => {
+  const value = change[column];
+  const isOperation = column === "operation";
+
+  return (
+    <td
+      key={column}
+      style={{
+        padding: "0.75rem 1rem",
+        color: "#fbf0df",
+        whiteSpace: "nowrap",
+      }}
+    >
+      {isOperation ? (
+        <span
+          style={{
+            display: "inline-block",
+            padding: "0.25rem 0.75rem",
+            borderRadius: "6px",
+            fontSize: "0.75rem",
+            fontWeight: "600",
+            backgroundColor: getOperationColor(value || ""),
+            color: "#ffffff",
+            textTransform: "uppercase",
+          }}
+        >
+          {value}
+        </span>
+      ) : value != null ? (
+        <span>{String(value)}</span>
+      ) : (
+        <span
+          style={{ color: "#64748b", fontStyle: "italic" }}
+        >
+          null
+        </span>
+      )}
+    </td>
+  );
+})}
+```
+
+## Hover States and Styling
+
+The table provides rich hover feedback:
+
+### Row Hover
+
+Rows highlight on hover with a lighter background:
+
+```typescript src/components/ChangesTable.tsx
+<tr
+  key={index}
+  style={{
+    borderBottom: "1px solid #333",
+    transition: "background-color 0.2s",
+    backgroundColor: index % 2 === 0 ? "#1a1a1a" : "#151515",
+  }}
+  onMouseEnter={(e) => {
+    e.currentTarget.style.backgroundColor = "#2a2a2a";
+  }}
+  onMouseLeave={(e) => {
+    e.currentTarget.style.backgroundColor =
+      index % 2 === 0 ? "#1a1a1a" : "#151515";
+  }}
+>
+  {/* ... row content */}
+</tr>
+```
+
+<Note>
+  Alternating row colors (zebra striping) improve readability for large datasets.
+</Note>
+
+### Column Header Hover
+
+Headers indicate sortability with hover effects:
+
+```typescript src/components/ChangesTable.tsx
+<th
+  key={column}
+  onClick={() => handleSort(column)}
+  style={{
+    padding: "1rem",
+    textAlign: "left",
+    fontWeight: "600",
+    color: "#fbf0df",
+    cursor: "pointer",
+    userSelect: "none",
+    transition: "background-color 0.2s",
+  }}
+  onMouseEnter={(e) => {
+    e.currentTarget.style.backgroundColor = "#1a1a1a";
+  }}
+  onMouseLeave={(e) => {
+    e.currentTarget.style.backgroundColor = "transparent";
+  }}
+>
+  {/* ... header content */}
+</th>
+```
+
+### Filter Input Focus
+
+Filter inputs highlight with border color changes:
+
+```typescript src/components/ChangesTable.tsx
+<input
+  type="text"
+  placeholder={`Filter ${column}...`}
+  value={filters[column] || ""}
+  onChange={(e) => handleFilterChange(column, e.target.value)}
+  style={{
+    width: "100%",
+    padding: "0.5rem",
+    backgroundColor: "#1a1a1a",
+    border: "1px solid #333",
+    borderRadius: "4px",
+    color: "#fbf0df",
+    fontSize: "0.85rem",
+    outline: "none",
+    transition: "border-color 0.2s",
+  }}
+  onFocus={(e) => {
+    e.currentTarget.style.borderColor = "#f3d5a3";
+  }}
+  onBlur={(e) => {
+    e.currentTarget.style.borderColor = "#333";
+  }}
+/>
+```
+
+## Dark Theme Implementation
+
+The entire interface uses a carefully designed dark color scheme:
+
+### Color Palette
+
+<ParamField path="#1a1a1a" type="background">
+  Primary background for table rows and inputs
+</ParamField>
+
+<ParamField path="#0f0f0f" type="background">
+  Darker background for headers and filter bar
+</ParamField>
+
+<ParamField path="#151515" type="background">
+  Alternate row background for zebra striping
+</ParamField>
+
+<ParamField path="#fbf0df" type="foreground">
+  Primary text color (warm off-white)
+</ParamField>
+
+<ParamField path="#f3d5a3" type="accent">
+  Accent color for highlights and active states
+</ParamField>
+
+<ParamField path="#333" type="border">
+  Border and divider color
+</ParamField>
+
+<ParamField path="#64748b" type="muted">
+  Muted text for null values and inactive states
+</ParamField>
+
+### Container Styling
+
+```typescript src/components/ChangesTable.tsx
+<div
+  style={{
+    backgroundColor: "#1a1a1a",
+    borderRadius: "12px",
+    border: "2px solid #fbf0df",
+    overflow: "hidden",
+    boxShadow: "0 4px 6px -1px rgba(0, 0, 0, 0.3)",
+    marginTop: "2rem",
+  }}
+>
+  {/* ... table content */}
+</div>
+```
+
+## Real-time Row Additions
+
+New rows appear automatically as database changes occur:
+
+```typescript src/App.tsx
+ws.onmessage = (event) => {
+  if (!isMounted) return;
+  
+  try {
+    const message: WebSocketMessage = JSON.parse(event.data);
+
+    if (message.type === "initial") {
+      // Initial load of all changes
+      setChanges(message.data);
+      setTotalChanges(message.data.length);
+    } else if (message.type === "change") {
+      // New changes - add to state
+      setChanges((prev) => [...prev, ...message.data]);
+      if (message.total) {
+        setTotalChanges(message.total);
+      }
+    }
+  } catch (error) {
+    console.error("Error parsing WebSocket message:", error);
+  }
+};
+```
+
+<Info>
+  React's state updates trigger automatic re-renders, causing new rows to appear instantly.
+</Info>
+
+### Adding Multiple Rows
+
+The spread operator allows efficient addition of multiple changes:
+
+```typescript
+setChanges((prev) => [...prev, ...message.data]);
+```
+
+## Empty State
+
+When no changes exist, a helpful empty state is displayed:
+
+```typescript src/components/ChangesTable.tsx
+if (changes.length === 0) {
+  return (
+    <div
+      style={{
+        padding: "3rem",
+        textAlign: "center",
+        color: "#64748b",
+        backgroundColor: "#1a1a1a",
+        borderRadius: "12px",
+        border: "2px solid #fbf0df",
+        marginTop: "2rem",
+      }}
+    >
+      <p style={{ fontSize: "1.2rem" }}>
+        Waiting for database changes...
+      </p>
+      <p style={{ fontSize: "0.9rem", marginTop: "0.5rem" }}>
+        Changes will appear here in real-time
+      </p>
+    </div>
+  );
+}
+```
+
+## Responsive Design
+
+The table uses horizontal scrolling for overflow:
+
+```typescript src/components/ChangesTable.tsx
+<div style={{ overflowX: "auto" }}>
+  <table
+    style={{
+      width: "100%",
+      borderCollapse: "collapse",
+      fontSize: "0.9rem",
+    }}
+  >
+    {/* ... table content */}
+  </table>
+</div>
+```
+
+<Tip>
+  Use `whiteSpace: "nowrap"` on table cells to prevent text wrapping and maintain column alignment.
+</Tip>
+
+## Component Architecture
+
+The table component is fully self-contained:
+
+```typescript src/components/ChangesTable.tsx
+interface Change {
+  operation: string;
+  table: string;
+  [key: string]: any;
+}
+
+interface ChangesTableProps {
+  changes: Change[];
+}
+
+export function ChangesTable({ changes }: ChangesTableProps) {
+  const [sortColumn, setSortColumn] = useState<string | null>(null);
+  const [sortDirection, setSortDirection] = useState<SortDirection>(null);
+  const [filters, setFilters] = useState<Record<string, string>>({});
+
+  // ... component logic
+}
+```
+
+<CardGroup cols={2}>
+  <Card title="Stateful" icon="database">
+    Manages own filter and sort state
+  </Card>
+  <Card title="Generic" icon="table">
+    Works with any data structure
+  </Card>
+  <Card title="Performant" icon="gauge-high">
+    Uses useMemo for optimization
+  </Card>
+  <Card title="Accessible" icon="universal-access">
+    Keyboard-friendly interactions
+  </Card>
+</CardGroup>
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Filtering & Sorting" icon="filter" href="/features/filtering-sorting">
+    Deep dive into data manipulation logic
+  </Card>
+  <Card title="WebSocket Connection" icon="signal" href="/features/websocket-connection">
+    Learn how data flows from server to table
+  </Card>
+</CardGroup>

@@ -1,0 +1,427 @@
+---
+title: Installation
+description: Detailed installation instructions for PostgreSQL Realtime Monitor
+---
+
+## System Requirements
+
+### Minimum Requirements
+
+- **Operating System**: Linux, macOS, or Windows (with WSL2)
+- **RAM**: 512 MB minimum, 1 GB recommended
+- **Disk Space**: 500 MB for dependencies and Docker images
+- **Network**: Internet connection for downloading dependencies
+
+### Required Software
+
+- **Bun** v1.0.0 or higher
+- **Docker** v20.10 or higher (with Docker Compose)
+- **Git** (for cloning the repository)
+
+### Supported Platforms
+
+| Platform | Bun Support | Docker Support | Status |
+|----------|-------------|----------------|--------|
+| Linux (x64) | ✅ | ✅ | Fully Supported |
+| macOS (Intel) | ✅ | ✅ | Fully Supported |
+| macOS (Apple Silicon) | ✅ | ✅ | Fully Supported |
+| Windows (WSL2) | ✅ | ✅ | Supported |
+| Windows (Native) | ⚠️ | ✅ | Limited Support |
+
+<Note>
+  For Windows users, we strongly recommend using WSL2 for the best experience with Bun.
+</Note>
+
+## Installing Bun
+
+Bun is an all-in-one JavaScript runtime that serves as the foundation for this application.
+
+### On Linux and macOS
+
+```bash
+curl -fsSL https://bun.sh/install | bash
+```
+
+This will:
+1. Download the latest version of Bun
+2. Install it to `~/.bun/bin/bun`
+3. Add Bun to your PATH
+
+### On Windows (WSL2)
+
+```bash
+curl -fsSL https://bun.sh/install | bash
+```
+
+### Verify Installation
+
+Check that Bun is installed correctly:
+
+```bash
+bun --version
+```
+
+You should see output like:
+
+```
+1.3.2
+```
+
+<Tip>
+  If the `bun` command is not found, restart your terminal or add `~/.bun/bin` to your PATH manually.
+</Tip>
+
+## Installing Docker
+
+Docker is required to run PostgreSQL with logical replication enabled.
+
+### On Linux
+
+Follow the official Docker installation guide for your distribution:
+- [Ubuntu](https://docs.docker.com/engine/install/ubuntu/)
+- [Debian](https://docs.docker.com/engine/install/debian/)
+- [Fedora](https://docs.docker.com/engine/install/fedora/)
+- [CentOS](https://docs.docker.com/engine/install/centos/)
+
+After installation, add your user to the docker group:
+
+```bash
+sudo usermod -aG docker $USER
+newgrp docker
+```
+
+### On macOS
+
+Download and install [Docker Desktop for Mac](https://docs.docker.com/desktop/install/mac-install/).
+
+### On Windows
+
+1. Install [WSL2](https://docs.microsoft.com/en-us/windows/wsl/install)
+2. Download and install [Docker Desktop for Windows](https://docs.docker.com/desktop/install/windows-install/)
+3. Enable WSL2 integration in Docker Desktop settings
+
+### Verify Docker Installation
+
+```bash
+docker --version
+docker compose version
+```
+
+Expected output:
+
+```
+Docker version 24.0.7, build afdd53b
+Docker Compose version v2.23.0
+```
+
+## Cloning the Repository
+
+Clone the PostgreSQL Realtime Monitor repository:
+
+```bash
+git clone https://github.com/miguelmartinezmestre/listen-postgres-changes-viewer.git
+cd listen-postgres-changes-viewer
+```
+
+## Project Structure
+
+After cloning, you'll have this structure:
+
+```
+listen-postgres/
+├── src/
+│   ├── index.ts              # Bun server with WebSocket
+│   ├── App.tsx               # Main React component
+│   ├── frontend.tsx          # Frontend entry point
+│   ├── components/
+│   │   └── ChangesTable.tsx  # Interactive table component
+│   ├── index.html            # HTML template
+│   └── index.css             # Styles
+├── db.ts                     # PostgreSQL configuration
+├── docker-compose.yml        # PostgreSQL setup
+├── init.sql                  # Database initialization
+├── package.json              # Dependencies and scripts
+├── tsconfig.json             # TypeScript configuration
+├── bunfig.toml               # Bun configuration
+└── README.md                 # Project documentation
+```
+
+## Installing Dependencies
+
+Install all required Node.js dependencies:
+
+```bash
+bun install
+```
+
+This installs the following packages:
+
+### Production Dependencies
+
+- **postgres** (v3.4.7): PostgreSQL client with logical replication support
+- **react** (v19.2.0): React library for building the UI
+- **react-dom** (v19.2.0): React DOM rendering
+- **typescript** (v5.9.3): TypeScript language support
+
+### Development Dependencies
+
+- **@types/bun** (v1.3.2): TypeScript definitions for Bun
+- **@types/node** (v24.10.1): TypeScript definitions for Node.js APIs
+- **@types/react** (v18.2.0): TypeScript definitions for React
+- **@types/react-dom** (v18.2.0): TypeScript definitions for React DOM
+
+<Tip>
+  Bun installs packages significantly faster than npm or yarn, often completing in seconds rather than minutes.
+</Tip>
+
+## Database Configuration
+
+The default database configuration is defined in `db.ts`:
+
+```typescript
+import postgres from "postgres"
+
+const DB_HOST = 'localhost'
+const DB_PORT = 5432
+const DB_NAME = 'appdb'
+const DB_USER = 'appuser'
+const DB_PASSWORD = 'secret'
+
+export const sql = postgres({
+    host: DB_HOST,
+    port: DB_PORT,
+    database: DB_NAME,
+    username: DB_USER,
+    password: DB_PASSWORD,
+    publications: 'alltables', // <- key for logical replication
+})
+```
+
+### Using a Custom PostgreSQL Instance
+
+If you want to use an existing PostgreSQL instance instead of Docker:
+
+1. **Enable Logical Replication**
+
+   Edit `postgresql.conf`:
+
+   ```ini
+   wal_level = logical
+   max_wal_senders = 10
+   max_replication_slots = 10
+   ```
+
+2. **Create the Publication**
+
+   Connect to your database and run:
+
+   ```sql
+   CREATE PUBLICATION alltables FOR ALL TABLES;
+   ```
+
+3. **Update `db.ts`**
+
+   Modify the connection parameters to match your database:
+
+   ```typescript
+   const DB_HOST = 'your-host'
+   const DB_PORT = 5432
+   const DB_NAME = 'your-database'
+   const DB_USER = 'your-user'
+   const DB_PASSWORD = 'your-password'
+   ```
+
+4. **Restart PostgreSQL**
+
+   ```bash
+   sudo systemctl restart postgresql
+   ```
+
+<Warning>
+  Logical replication requires `wal_level=logical`, which may increase disk usage. Monitor your WAL disk space in production environments.
+</Warning>
+
+## Verifying Installation
+
+Verify that everything is installed correctly:
+
+<Steps>
+  <Step title="Check Bun">
+    ```bash
+    bun --version
+    ```
+    Expected: Version number (e.g., `1.3.2`)
+  </Step>
+
+  <Step title="Check Docker">
+    ```bash
+    docker --version
+    docker compose version
+    ```
+    Expected: Version information for both commands
+  </Step>
+
+  <Step title="Check dependencies">
+    ```bash
+    ls node_modules | wc -l
+    ```
+    Expected: A number greater than 0 (should show installed packages)
+  </Step>
+
+  <Step title="Verify TypeScript configuration">
+    ```bash
+    cat tsconfig.json
+    ```
+    Expected: Valid JSON configuration with `"jsx": "react-jsx"`
+  </Step>
+</Steps>
+
+## Troubleshooting Common Issues
+
+### Issue: "bun: command not found"
+
+**Cause**: Bun is not in your PATH.
+
+**Solution**:
+
+```bash
+# Add to ~/.bashrc or ~/.zshrc
+export BUN_INSTALL="$HOME/.bun"
+export PATH="$BUN_INSTALL/bin:$PATH"
+
+# Reload your shell
+source ~/.bashrc  # or ~/.zshrc
+```
+
+### Issue: Docker permission denied
+
+**Cause**: Your user doesn't have permission to access Docker.
+
+**Solution**:
+
+```bash
+# Add user to docker group
+sudo usermod -aG docker $USER
+
+# Apply changes
+newgrp docker
+
+# Test
+docker ps
+```
+
+### Issue: Port 5432 already in use
+
+**Cause**: Another PostgreSQL instance is running on port 5432.
+
+**Solution 1**: Stop the existing PostgreSQL instance:
+
+```bash
+sudo systemctl stop postgresql
+```
+
+**Solution 2**: Change the port in `docker-compose.yml`:
+
+```yaml
+ports:
+  - "5433:5432"  # Use port 5433 on host
+```
+
+Then update `db.ts`:
+
+```typescript
+const DB_PORT = 5433
+```
+
+### Issue: "Cannot connect to database"
+
+**Cause**: PostgreSQL container is not running or not ready.
+
+**Solution**:
+
+```bash
+# Check if container is running
+docker ps | grep postgres-realtime
+
+# Check container logs
+docker logs postgres-realtime
+
+# Restart container
+docker-compose restart
+
+# Wait 5-10 seconds for PostgreSQL to be ready
+sleep 10
+```
+
+### Issue: TypeScript errors during development
+
+**Cause**: Missing type definitions or configuration issues.
+
+**Solution**:
+
+```bash
+# Reinstall dependencies
+rm -rf node_modules bun.lock
+bun install
+
+# Verify TypeScript configuration
+bun run --bun tsc --noEmit
+```
+
+### Issue: WebSocket connection fails
+
+**Cause**: Server is not running or firewall blocking port 3000.
+
+**Solution**:
+
+```bash
+# Check if server is running
+lsof -i :3000
+
+# Restart the server
+bun run dev
+
+# Check firewall (Linux)
+sudo ufw allow 3000
+
+# Check firewall (macOS)
+# Open System Preferences > Security & Privacy > Firewall
+```
+
+### Issue: Changes not appearing in real-time
+
+**Cause**: Publication not created or logical replication not enabled.
+
+**Solution**:
+
+```bash
+# Connect to database
+docker exec -it postgres-realtime psql -U appuser -d appdb
+
+# Check if publication exists
+\dRp
+
+# If not, create it
+CREATE PUBLICATION alltables FOR ALL TABLES;
+
+# Check replication settings
+SHOW wal_level;
+# Should output: logical
+```
+
+## Next Steps
+
+Now that installation is complete:
+
+<CardGroup cols={2}>
+  <Card title="Quick Start" icon="rocket" href="/quickstart">
+    Get the application running and test it with sample data
+  </Card>
+  <Card title="Configuration" icon="sliders" href="/configuration">
+    Learn about configuration options and customization
+  </Card>
+</CardGroup>
+
+<Note>
+  If you encounter issues not covered here, please check the GitHub issues or create a new issue with details about your environment and the error messages.
+</Note>

@@ -1,0 +1,410 @@
+---
+title: Local Development
+description: Set up and run PostgreSQL Realtime Monitor in development mode with hot reloading and debugging features
+---
+
+## Overview
+
+PostgreSQL Realtime Monitor provides an optimized development workflow with Hot Module Reloading (HMR), console logging, and real-time monitoring capabilities powered by Bun.
+
+## Prerequisites
+
+Before starting development, ensure you have:
+
+- [Bun](https://bun.sh) runtime installed
+- Docker and Docker Compose (for local PostgreSQL)
+- Node.js development tools (optional, for IDE support)
+
+## Quick Start
+
+### 1. Install Dependencies
+
+Install project dependencies using Bun:
+
+```bash
+bun install
+```
+
+This installs the following key dependencies:
+- `postgres` - PostgreSQL client with logical replication support
+- `react` and `react-dom` - Frontend framework
+- `typescript` - Type safety
+
+### 2. Start Local PostgreSQL
+
+The project includes a Docker Compose configuration that sets up PostgreSQL with logical replication enabled:
+
+```bash
+docker-compose up -d
+```
+
+<Info>
+The PostgreSQL container is configured with `wal_level=logical` to enable change data capture (CDC) for real-time monitoring.
+</Info>
+
+**Default Database Configuration** (from `docker-compose.yml` and `db.ts`):
+
+```yaml
+Host: localhost
+Port: 5432
+Database: appdb
+User: appuser
+Password: secret
+```
+
+The container automatically creates a publication for all tables:
+
+```sql init.sql
+CREATE PUBLICATION alltables FOR ALL TABLES;
+```
+
+### 3. Run Development Server
+
+Start the application with the development script:
+
+```bash
+bun run dev
+```
+
+This executes the script defined in `package.json`:
+
+```json package.json
+{
+  "scripts": {
+    "dev": "bun run src/index.ts"
+  }
+}
+```
+
+The server starts on `http://localhost:3000` with WebSocket endpoint at `ws://localhost:3000/ws`.
+
+## Development Features
+
+### Hot Module Reloading (HMR)
+
+The development server includes HMR configuration in `src/index.ts:74-80`:
+
+```typescript src/index.ts
+development: process.env.NODE_ENV !== "production" && {
+  // Enable browser hot reloading in development
+  hmr: true,
+
+  // Echo console logs from the browser to the server
+  console: true,
+}
+```
+
+<AccordionGroup>
+  <Accordion title="HMR Behavior">
+    - **Automatic**: HMR is enabled by default when `NODE_ENV` is not set to `"production"`
+    - **Browser Reloading**: Changes to React components automatically refresh the browser
+    - **State Preservation**: WebSocket connections may disconnect during HMR but automatically reconnect
+    - **Fast Refresh**: Bun's built-in HMR provides near-instant updates
+  </Accordion>
+  
+  <Accordion title="Console Logging">
+    With `console: true`, browser console logs are echoed to the server terminal:
+    - Frontend `console.log()` appears in your server output
+    - Helps debug client-side issues without switching windows
+    - Useful for tracking WebSocket message flow
+  </Accordion>
+</AccordionGroup>
+
+### Real-Time Change Monitoring
+
+The server subscribes to PostgreSQL changes using the `postgres` library's subscribe feature:
+
+```typescript src/index.ts:87-124
+const { unsubscribe } = await sql.subscribe(
+  "*", // pattern: all (all operations and tables)
+  (row, { command, relation }) => {
+    // Format the relation (can be object or string)
+    const tableName =
+      typeof relation === "string"
+        ? relation
+        : relation?.table
+          ? `${relation.schema || "public"}.${relation.table}`
+          : JSON.stringify(relation);
+
+    // Create an object that combines operation, table and row data
+    const rows = Array.isArray(row) ? row : [row];
+    const newChanges = rows.map((r) => ({
+      operation: command.toUpperCase(),
+      table: tableName,
+      ...r,
+    }));
+
+    // Add new changes to the accumulative array
+    allChanges.push(...newChanges);
+
+    // Send to all WebSocket clients
+    broadcast({
+      type: "change",
+      data: newChanges,
+      total: allChanges.length,
+    });
+
+    // Also log to console
+    console.log(
+      `📊 Change detected: ${command.toUpperCase()} on ${tableName}`
+    );
+  },
+  () => {
+    console.log("✅ Realtime subscription ready (connected or reconnected)");
+  }
+);
+```
+
+### WebSocket Server
+
+The development server includes WebSocket support with client connection management:
+
+```typescript src/index.ts:49-72
+websocket: {
+  message(ws: any, message: string | Buffer) {
+    // Clients can send messages if needed
+    console.log("Message received:", message);
+  },
+  open(ws: any) {
+    clients.add(ws);
+    console.log("WebSocket client connected. Total:", clients.size);
+
+    // Send all existing changes to the new client
+    if (allChanges.length > 0) {
+      ws.send(
+        JSON.stringify({
+          type: "initial",
+          data: allChanges,
+        })
+      );
+    }
+  },
+  close(ws: any) {
+    clients.delete(ws);
+    console.log("WebSocket client disconnected. Total:", clients.size);
+  },
+}
+```
+
+## Testing Changes
+
+Test the real-time monitoring by making database changes:
+
+### Connect to PostgreSQL
+
+```bash
+docker exec -it postgres-realtime psql -U appuser -d appdb
+```
+
+### Create Test Table
+
+```sql
+CREATE TABLE todos (
+  id SERIAL PRIMARY KEY,
+  title TEXT NOT NULL,
+  done BOOLEAN NOT NULL DEFAULT false,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+```
+
+### Perform CRUD Operations
+
+```sql
+-- INSERT
+INSERT INTO todos (title) VALUES ('Test task 1');
+INSERT INTO todos (title) VALUES ('Test task 2');
+
+-- UPDATE
+UPDATE todos SET done = true WHERE id = 1;
+
+-- DELETE
+DELETE FROM todos WHERE id = 2;
+```
+
+<Check>
+All database changes should appear instantly in your browser at `http://localhost:3000` and be logged in the server console.
+</Check>
+
+## Debugging Tips
+
+### Server-Side Debugging
+
+1. **Console Logs**: The server logs connection events and database changes:
+   ```
+   🚀 Server running at http://localhost:3000/
+   📡 WebSocket available at ws://localhost:3000/ws
+   ✅ Realtime subscription ready (connected or reconnected)
+   WebSocket client connected. Total: 1
+   📊 Change detected: INSERT on public.todos
+   ```
+
+2. **Bun Inspector**: Use Bun's built-in debugger:
+   ```bash
+   bun --inspect run src/index.ts
+   ```
+   Then connect Chrome DevTools to the inspector URL.
+
+3. **TypeScript Source Maps**: Enabled in `tsconfig.json:19`:
+   ```json
+   "sourceMap": true
+   ```
+
+### Client-Side Debugging
+
+1. **Browser Console**: With `console: true`, all frontend logs appear in both browser and server
+
+2. **WebSocket Messages**: Monitor WebSocket traffic in browser DevTools:
+   - Network tab → Filter by WS
+   - Inspect message payloads and connection state
+
+3. **React DevTools**: Install React DevTools extension for component inspection
+
+### Database Connection Issues
+
+<Warning>
+If the server fails to connect to PostgreSQL, verify:
+- PostgreSQL container is running: `docker ps`
+- Port 5432 is not in use by another service
+- Credentials in `db.ts` match `docker-compose.yml`
+</Warning>
+
+Check PostgreSQL logs:
+```bash
+docker logs postgres-realtime
+```
+
+Verify publication exists:
+```sql
+SELECT * FROM pg_publication;
+```
+
+### WebSocket Connection Issues
+
+If clients can't connect to WebSocket:
+
+1. Check server is running and port 3000 is available
+2. Verify WebSocket upgrade succeeds (check server logs)
+3. Test WebSocket connection manually:
+   ```javascript
+   const ws = new WebSocket('ws://localhost:3000/ws');
+   ws.onopen = () => console.log('Connected');
+   ws.onmessage = (e) => console.log('Message:', e.data);
+   ```
+
+## API Endpoints
+
+During development, the following endpoints are available:
+
+| Endpoint | Type | Description |
+|----------|------|-------------|
+| `/` | HTTP | Main application (React frontend) |
+| `/api/changes` | HTTP GET | Returns all accumulated changes as JSON |
+| `/ws` | WebSocket | Real-time change notifications |
+
+### Testing API Endpoint
+
+```bash
+curl http://localhost:3000/api/changes | jq
+```
+
+Example response:
+```json
+[
+  {
+    "operation": "INSERT",
+    "table": "public.todos",
+    "id": 1,
+    "title": "Test task 1",
+    "done": false,
+    "created_at": "2026-03-04T10:30:00Z"
+  }
+]
+```
+
+## Configuration Files
+
+### Database Configuration
+
+Edit `db.ts` to connect to a different PostgreSQL instance:
+
+```typescript db.ts
+import postgres from "postgres"
+
+const DB_HOST = 'localhost'
+const DB_PORT = 5432
+const DB_NAME = 'appdb'
+const DB_USER = 'appuser'
+const DB_PASSWORD = 'secret'
+
+export const sql = postgres({
+    host: DB_HOST,
+    port: DB_PORT,
+    database: DB_NAME,
+    username: DB_USER,
+    password: DB_PASSWORD,
+    publications: 'alltables', // <- key
+})
+```
+
+<Info>
+The `publications` parameter must match the publication name in PostgreSQL. The default `alltables` publication is created by `init.sql`.
+</Info>
+
+### TypeScript Configuration
+
+Key settings in `tsconfig.json`:
+
+```json tsconfig.json
+{
+  "compilerOptions": {
+    "module": "nodenext",
+    "target": "esnext",
+    "types": ["bun-types"],
+    "jsx": "react-jsx",
+    "strict": true,
+    "sourceMap": true
+  }
+}
+```
+
+## Development Workflow
+
+<Steps>
+  <Step title="Start PostgreSQL">
+    Launch the database container with logical replication enabled:
+    ```bash
+    docker-compose up -d
+    ```
+  </Step>
+  
+  <Step title="Run Development Server">
+    Start the Bun server with HMR:
+    ```bash
+    bun run dev
+    ```
+  </Step>
+  
+  <Step title="Open Browser">
+    Navigate to `http://localhost:3000` to view the monitoring dashboard
+  </Step>
+  
+  <Step title="Make Code Changes">
+    Edit React components or server code - changes apply automatically via HMR
+  </Step>
+  
+  <Step title="Test Database Changes">
+    Connect to PostgreSQL and perform CRUD operations to see real-time updates
+  </Step>
+</Steps>
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Production Deployment" icon="rocket" href="/deployment/production">
+    Learn how to deploy to production with environment variables and security best practices
+  </Card>
+  
+  <Card title="Architecture" icon="diagram-project" href="/architecture">
+    Understand how the real-time monitoring system works
+  </Card>
+</CardGroup>

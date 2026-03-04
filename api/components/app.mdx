@@ -1,0 +1,268 @@
+---
+title: 'App Component'
+description: 'Main application component that manages WebSocket connection and displays real-time PostgreSQL changes'
+---
+
+## Overview
+
+The `App` component is the root component of the PostgreSQL Realtime Monitor application. It manages the WebSocket connection to the backend server, handles real-time database change events, and renders the connection status and changes table.
+
+## Location
+
+`src/App.tsx`
+
+## State Management
+
+The App component manages three primary state variables:
+
+<ResponseField name="changes" type="Change[]">
+  Array of database change records received from the WebSocket connection. Each change contains operation type, table name, and dynamic data fields.
+</ResponseField>
+
+<ResponseField name="connected" type="boolean">
+  Indicates whether the WebSocket connection is currently active. Used to display connection status indicator.
+</ResponseField>
+
+<ResponseField name="totalChanges" type="number">
+  Total count of database changes received. Displayed in the header for user visibility.
+</ResponseField>
+
+## TypeScript Interfaces
+
+### Change
+
+```typescript
+interface Change {
+  operation: string;
+  table: string;
+  [key: string]: any;
+}
+```
+
+Represents a single database change event.
+
+<ResponseField name="operation" type="string" required>
+  The database operation type: `INSERT`, `UPDATE`, or `DELETE`
+</ResponseField>
+
+<ResponseField name="table" type="string" required>
+  The name of the database table where the change occurred
+</ResponseField>
+
+<ResponseField name="[key: string]" type="any">
+  Additional dynamic fields containing the actual data values from the changed row
+</ResponseField>
+
+### WebSocketMessage
+
+```typescript
+interface WebSocketMessage {
+  type: "initial" | "change";
+  data: Change[];
+  total?: number;
+}
+```
+
+Represents messages received from the WebSocket server.
+
+<ResponseField name="type" type="'initial' | 'change'" required>
+  Message type:
+  - `initial`: First batch of existing changes sent on connection
+  - `change`: New real-time changes
+</ResponseField>
+
+<ResponseField name="data" type="Change[]" required>
+  Array of change records included in this message
+</ResponseField>
+
+<ResponseField name="total" type="number">
+  Optional total count of changes, sent with `change` messages to update the counter
+</ResponseField>
+
+## WebSocket Connection Logic
+
+The component uses a `useEffect` hook to manage the WebSocket connection lifecycle:
+
+### Connection Initialization
+
+```typescript
+const connect = () => {
+  // Avoid creating multiple connections
+  if (wsRef.current?.readyState === WebSocket.OPEN || 
+      wsRef.current?.readyState === WebSocket.CONNECTING) {
+    return;
+  }
+
+  // Clean up previous connection if it exists
+  if (wsRef.current) {
+    try {
+      wsRef.current.close();
+    } catch (e) {
+      // Ignore errors when closing
+    }
+  }
+
+  // Connect to WebSocket
+  ws = new WebSocket("ws://localhost:3000/ws");
+  wsRef.current = ws;
+};
+```
+
+### Event Handlers
+
+**onopen**: Sets connection status to true when WebSocket successfully connects
+
+```typescript
+ws.onopen = () => {
+  if (isMounted) {
+    console.log("Connected to WebSocket server");
+    setConnected(true);
+  }
+};
+```
+
+**onmessage**: Processes incoming messages and updates state accordingly
+
+```typescript
+ws.onmessage = (event) => {
+  if (!isMounted) return;
+  
+  try {
+    const message: WebSocketMessage = JSON.parse(event.data);
+
+    if (message.type === "initial") {
+      // Initial load of all changes
+      setChanges(message.data);
+      setTotalChanges(message.data.length);
+    } else if (message.type === "change") {
+      // New changes - add to state
+      setChanges((prev) => [...prev, ...message.data]);
+      if (message.total) {
+        setTotalChanges(message.total);
+      }
+    }
+  } catch (error) {
+    console.error("Error parsing WebSocket message:", error);
+  }
+};
+```
+
+**onerror**: Logs errors and sets connection status to false
+
+```typescript
+ws.onerror = (error) => {
+  if (isMounted) {
+    console.error("WebSocket error:", error);
+    setConnected(false);
+  }
+};
+```
+
+**onclose**: Handles disconnection and triggers reconnection logic
+
+```typescript
+ws.onclose = (event) => {
+  if (!isMounted) return;
+  
+  console.log("Disconnected from WebSocket server", event.code, event.reason);
+  setConnected(false);
+  wsRef.current = null;
+
+  // Try to reconnect after 3 seconds only if it wasn't an intentional close
+  if (event.code !== 1000 && isMounted) {
+    reconnectTimeout = setTimeout(() => {
+      if (isMounted && (!wsRef.current || wsRef.current.readyState === WebSocket.CLOSED)) {
+        connect();
+      }
+    }, 3000);
+  }
+};
+```
+
+## Reconnection Handling
+
+The component implements automatic reconnection with the following features:
+
+- **3-second delay**: After unexpected disconnection, waits 3 seconds before attempting to reconnect
+- **Intentional close detection**: Only reconnects for non-1000 close codes (abnormal disconnections)
+- **Mount state check**: Ensures reconnection only occurs if component is still mounted
+- **Duplicate prevention**: Checks WebSocket state before creating new connections
+
+## Cleanup
+
+The useEffect cleanup function ensures proper resource management:
+
+```typescript
+return () => {
+  isMounted = false;
+  
+  // Clear reconnection timeout
+  if (reconnectTimeout) {
+    clearTimeout(reconnectTimeout);
+  }
+
+  // Close WebSocket connection
+  if (wsRef.current) {
+    try {
+      wsRef.current.close(1000, "Component unmounting");
+    } catch (e) {
+      // Ignore errors
+    }
+    wsRef.current = null;
+  }
+};
+```
+
+## Rendered UI
+
+The component renders:
+
+1. **Header**: Application title with database emoji
+2. **Status Indicator**: Green/red dot showing connection status with label
+3. **Total Changes Counter**: Displays total number of changes received
+4. **ChangesTable**: Table component displaying all database changes
+
+### Connection Status Indicator
+
+```jsx
+<div
+  style={{
+    width: "10px",
+    height: "10px",
+    borderRadius: "50%",
+    backgroundColor: connected ? "#10b981" : "#ef4444",
+    boxShadow: connected ? "0 0 10px #10b981" : "none",
+    transition: "all 0.3s",
+  }}
+/>
+<span>{connected ? "Connected" : "Disconnected"}</span>
+```
+
+- Green (#10b981) with glow effect when connected
+- Red (#ef4444) without glow when disconnected
+- Smooth transition between states
+
+## Usage Example
+
+```typescript
+import { App } from './App';
+import ReactDOM from 'react-dom/client';
+
+ReactDOM.createRoot(document.getElementById('root')!).render(
+  <App />
+);
+```
+
+## Dependencies
+
+- `react` (useState, useEffect, useRef hooks)
+- `ChangesTable` component from `./components/ChangesTable`
+- `./index.css` for global styles
+
+## WebSocket Server Endpoint
+
+```
+ws://localhost:3000/ws
+```
+
+The component expects a WebSocket server running on port 3000 at the `/ws` endpoint.

@@ -1,97 +1,236 @@
 ---
-title: "Introduction"
-description: "Welcome to the new home for your documentation"
+title: PostgreSQL Realtime Monitor
+mode: custom
 ---
 
-## Setting up
+<div className="relative overflow-hidden bg-gradient-to-br from-[#0f1117] via-[#1a1d27] to-[#0f1117] dark:from-[#0f1117] dark:via-[#1a1d27] dark:to-[#0f1117] py-20">
+  <div className="absolute inset-0 bg-[url('/grid.svg')] opacity-10"></div>
+  <div className="relative max-w-6xl mx-auto px-6">
+    <div className="grid lg:grid-cols-12 gap-12 items-center">
+      <div className="lg:col-span-7 space-y-8">
+        <div className="space-y-4">
+          <h1 className="text-4xl sm:text-5xl lg:text-6xl font-bold text-gray-100 dark:text-gray-100">
+            Monitor PostgreSQL in real-time
+          </h1>
+          <p className="text-lg sm:text-xl text-gray-400 dark:text-gray-400 max-w-2xl">
+            Track every INSERT, UPDATE, and DELETE operation as it happens with WebSocket-powered live updates and an intuitive filtering interface.
+          </p>
+        </div>
+        <div className="flex flex-wrap gap-4">
+          <a 
+            href="/quickstart" 
+            className="inline-flex items-center px-6 py-3 rounded-lg bg-[#10b981] hover:bg-[#059669] text-white font-semibold transition-colors no-underline"
+          >
+            Get Started
+          </a>
+          <a 
+            href="/api/rest-endpoints" 
+            className="inline-flex items-center px-6 py-3 rounded-lg border border-white/30 bg-white/10 hover:bg-white/20 text-white font-semibold transition-colors no-underline"
+          >
+            Explore API
+          </a>
+        </div>
+      </div>
+      <div className="lg:col-span-5">
+        <div className="rounded-2xl border border-[#10b981]/30 bg-[#1a1d27] dark:bg-[#1a1d27] p-6 shadow-2xl">
+          <div className="flex items-center gap-2 mb-4">
+            <div className="w-3 h-3 rounded-full bg-[#10b981] shadow-[0_0_10px_#10b981]"></div>
+            <span className="text-sm text-gray-300 dark:text-gray-300">Connected</span>
+          </div>
+          <pre className="text-xs text-gray-300 dark:text-gray-300 overflow-x-auto">
+{`{
+  "type": "change",
+  "data": [{
+    "operation": "INSERT",
+    "table": "users",
+    "id": 42,
+    "email": "user@example.com",
+    "created_at": "2026-03-04T12:00:00Z"
+  }]
+}`}
+          </pre>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
 
-Get your documentation site up and running in minutes.
+<div className="mt-16 mb-16 max-w-5xl mx-auto px-6">
+  <div className="text-center mb-12">
+    <h2 className="text-2xl sm:text-3xl font-semibold text-gray-900 dark:text-white mb-4">
+      Get started in minutes
+    </h2>
+    <p className="text-base text-gray-600 dark:text-gray-400">
+      Follow these steps to start monitoring your PostgreSQL database
+    </p>
+  </div>
 
-<Card
-  title="Start here"
-  icon="rocket"
-  href="/quickstart"
-  horizontal
->
-  Follow our three step quickstart guide.
-</Card>
+  <Steps>
+    <Step title="Install dependencies">
+      Install Bun and clone the repository to get started.
+      
+      ```bash
+      bun install
+      ```
+    </Step>
+    
+    <Step title="Start PostgreSQL">
+      Launch PostgreSQL with logical replication enabled using Docker.
+      
+      ```bash
+      docker-compose up -d
+      ```
+      
+      <Note>
+        The Docker configuration automatically enables logical replication and creates the required publication.
+      </Note>
+    </Step>
+    
+    <Step title="Run the application">
+      Start the Bun server and open your browser to see live database changes.
+      
+      ```bash
+      bun run dev
+      ```
+      
+      Navigate to `http://localhost:3000` to see the monitoring interface.
+    </Step>
+    
+    <Step title="Test with real data">
+      Execute SQL commands to see changes appear in real-time.
+      
+      ```sql
+      INSERT INTO todos (title) VALUES ('Test task');
+      UPDATE todos SET done = true WHERE id = 1;
+      DELETE FROM todos WHERE id = 2;
+      ```
+      
+      Watch as every operation appears instantly in your browser.
+    </Step>
+  </Steps>
+</div>
 
-## Make it yours
+<div className="mt-16 mb-16 max-w-5xl mx-auto px-6">
+  <div className="text-center mb-12">
+    <h2 className="text-2xl sm:text-3xl font-semibold text-gray-900 dark:text-white mb-4">
+      Explore by feature
+    </h2>
+    <p className="text-base text-gray-600 dark:text-gray-400">
+      Discover what makes PostgreSQL Realtime Monitor powerful
+    </p>
+  </div>
 
-Design a docs site that looks great and empowers your users.
-
-<Columns cols={2}>
-  <Card
-    title="Edit locally"
-    icon="pen-to-square"
-    href="/development"
-  >
-    Edit your docs locally and preview them in real time.
-  </Card>
-  <Card
-    title="Customize your site"
-    icon="palette"
-    href="/essentials/settings"
-  >
-    Customize the design and colors of your site to match your brand.
-  </Card>
+  <CardGroup cols={2}>
     <Card
-    title="Set up navigation"
-    icon="map"
-    href="/essentials/navigation"
-  >
-    Organize your docs to help users find what they need and succeed with your product.
-  </Card>
-  <Card
-    title="API documentation"
-    icon="terminal"
-    href="/api-reference/introduction"
-  >
-    Auto-generate API documentation from OpenAPI specifications.
-  </Card>
-</Columns>
+      title="Realtime monitoring"
+      icon="bolt"
+      href="/features/realtime-monitoring"
+    >
+      PostgreSQL logical replication with instant WebSocket updates for every database operation.
+    </Card>
+    <Card
+      title="WebSocket connection"
+      icon="signal"
+      href="/features/websocket-connection"
+    >
+      Persistent connections with automatic reconnection and historical change synchronization.
+    </Card>
+    <Card
+      title="Filtering & sorting"
+      icon="filter"
+      href="/features/filtering-sorting"
+    >
+      Per-column filters and multi-column sorting to find exactly what you need.
+    </Card>
+    <Card
+      title="Table interface"
+      icon="table"
+      href="/features/table-interface"
+    >
+      Modern React table with dynamic columns, hover states, and operation badges.
+    </Card>
+  </CardGroup>
+</div>
 
-## Create beautiful pages
+<div className="mt-16 mb-16 max-w-5xl mx-auto px-6">
+  <div className="text-center mb-12">
+    <h2 className="text-2xl sm:text-3xl font-semibold text-gray-900 dark:text-white mb-4">
+      Essential resources
+    </h2>
+    <p className="text-base text-gray-600 dark:text-gray-400">
+      Everything you need to configure and deploy
+    </p>
+  </div>
 
-Everything you need to create world-class documentation.
+  <CardGroup cols={3}>
+    <Card
+      title="Database setup"
+      icon="database"
+      href="/configuration/database-setup"
+    >
+      Configure PostgreSQL with logical replication and publications.
+    </Card>
+    <Card
+      title="Environment config"
+      icon="gear"
+      href="/configuration/environment"
+    >
+      Set up database credentials and server settings.
+    </Card>
+    <Card
+      title="Docker deployment"
+      icon="docker"
+      href="/configuration/docker"
+    >
+      Run PostgreSQL with docker-compose for quick testing.
+    </Card>
+    <Card
+      title="REST API"
+      icon="code"
+      href="/api/rest-endpoints"
+    >
+      HTTP endpoint to retrieve all accumulated changes.
+    </Card>
+    <Card
+      title="WebSocket API"
+      icon="plug"
+      href="/api/websocket"
+    >
+      Real-time WebSocket protocol and message formats.
+    </Card>
+    <Card
+      title="React components"
+      icon="react"
+      href="/api/components/app"
+    >
+      Frontend component architecture and props.
+    </Card>
+  </CardGroup>
+</div>
 
-<Columns cols={2}>
-  <Card
-    title="Write with MDX"
-    icon="pen-fancy"
-    href="/essentials/markdown"
-  >
-    Use MDX to style your docs pages.
-  </Card>
-  <Card
-    title="Code samples"
-    icon="code"
-    href="/essentials/code"
-  >
-    Add sample code to demonstrate how to use your product.
-  </Card>
-  <Card
-    title="Images"
-    icon="image"
-    href="/essentials/images"
-  >
-    Display images and other media.
-  </Card>
-  <Card
-    title="Reusable snippets"
-    icon="recycle"
-    href="/essentials/reusable-snippets"
-  >
-    Write once and reuse across your docs.
-  </Card>
-</Columns>
-
-## Need inspiration?
-
-<Card
-  title="See complete examples"
-  icon="stars"
-  href="https://mintlify.com/customers"
->
-  Browse our showcase of exceptional documentation sites.
-</Card>
+<div className="mt-16 mb-16 max-w-5xl mx-auto px-6">
+  <div className="rounded-2xl border border-gray-200 dark:border-[#27272a] bg-gray-50 dark:bg-[#1a1d27] p-8 sm:p-12">
+    <div className="max-w-3xl mx-auto text-center space-y-6">
+      <h2 className="text-2xl sm:text-3xl font-semibold text-gray-900 dark:text-white">
+        Ready to start monitoring?
+      </h2>
+      <p className="text-base text-gray-600 dark:text-gray-400">
+        Set up your PostgreSQL monitoring environment in under 5 minutes with our quickstart guide.
+      </p>
+      <div className="flex flex-wrap justify-center gap-4">
+        <a 
+          href="/quickstart" 
+          className="inline-flex items-center px-6 py-3 rounded-lg bg-[#10b981] hover:bg-[#059669] text-white font-semibold transition-colors no-underline"
+        >
+          View Quickstart
+        </a>
+        <a 
+          href="/installation" 
+          className="inline-flex items-center px-6 py-3 rounded-lg border border-gray-300 dark:border-[#27272a] bg-white dark:bg-[#242838] hover:bg-gray-50 dark:hover:bg-[#2a2e3f] text-gray-900 dark:text-white font-semibold transition-colors no-underline"
+        >
+          Installation Guide
+        </a>
+      </div>
+    </div>
+  </div>
+</div>

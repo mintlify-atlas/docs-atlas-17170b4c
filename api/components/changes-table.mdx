@@ -1,0 +1,385 @@
+---
+title: 'ChangesTable Component'
+description: 'Interactive table component for displaying, filtering, and sorting real-time PostgreSQL database changes'
+---
+
+## Overview
+
+The `ChangesTable` component is a feature-rich table component that displays database changes with dynamic column generation, real-time filtering, multi-column sorting, and operation-based color coding. It adapts to any schema structure by dynamically generating columns from the data.
+
+## Location
+
+`src/components/ChangesTable.tsx`
+
+## Props
+
+<ParamField path="changes" type="Change[]" required>
+  Array of database change records to display. Each change object contains at minimum an `operation` and `table` field, plus dynamic data columns.
+</ParamField>
+
+## TypeScript Interfaces
+
+### ChangesTableProps
+
+```typescript
+interface ChangesTableProps {
+  changes: Change[];
+}
+```
+
+<ParamField path="changes" type="Change[]" required>
+  Array of change objects to render in the table
+</ParamField>
+
+### Change
+
+```typescript
+interface Change {
+  operation: string;
+  table: string;
+  [key: string]: any;
+}
+```
+
+<ResponseField name="operation" type="string" required>
+  Database operation type: `INSERT`, `UPDATE`, or `DELETE`
+</ResponseField>
+
+<ResponseField name="table" type="string" required>
+  Name of the database table where the change occurred
+</ResponseField>
+
+<ResponseField name="[key: string]" type="any">
+  Dynamic fields representing column values from the database row
+</ResponseField>
+
+### SortDirection
+
+```typescript
+type SortDirection = "asc" | "desc" | null;
+```
+
+Represents the sorting direction for a column.
+
+## State Management
+
+The component uses three state variables for interactive features:
+
+<ResponseField name="sortColumn" type="string | null">
+  Currently active sort column. `null` when no sorting is applied.
+</ResponseField>
+
+<ResponseField name="sortDirection" type="SortDirection">
+  Current sort direction: `"asc"`, `"desc"`, or `null`
+</ResponseField>
+
+<ResponseField name="filters" type="Record<string, string>">
+  Object mapping column names to filter strings. Empty strings are treated as no filter.
+</ResponseField>
+
+## Dynamic Column Generation
+
+The component automatically detects all unique columns from the changes array:
+
+```typescript
+const columns = useMemo(() => {
+  const columnSet = new Set<string>();
+  changes.forEach((change) => {
+    Object.keys(change).forEach((key) => columnSet.add(key));
+  });
+  return Array.from(columnSet);
+}, [changes]);
+```
+
+This approach ensures the table adapts to any database schema without hardcoded column definitions.
+
+## Filtering Logic
+
+The component implements case-insensitive, multi-column filtering:
+
+```typescript
+const filteredChanges = useMemo(() => {
+  const filterEntries = Object.entries(filters).filter(([_, value]) => value.trim() !== "");
+
+  if (filterEntries.length === 0) {
+    return changes;
+  }
+
+  return changes.filter((change) => {
+    return filterEntries.every(([column, filterValue]) => {
+      const value = change[column];
+      if (value == null) {
+        return filterValue.toLowerCase() === "null" || filterValue.toLowerCase() === "";
+      }
+      return String(value).toLowerCase().includes(filterValue.toLowerCase());
+    });
+  });
+}, [changes, filters]);
+```
+
+### Filter Features
+
+- **Case-insensitive**: All comparisons are lowercase
+- **Substring matching**: Uses `.includes()` for partial matches
+- **Multi-column**: All active filters must match (AND logic)
+- **Null handling**: `null` values can be filtered by typing "null"
+- **Real-time**: Updates immediately as user types
+
+### Filter UI
+
+Each column has a filter input in the header row:
+
+```typescript
+<input
+  type="text"
+  placeholder={`Filter ${column}...`}
+  value={filters[column] || ""}
+  onChange={(e) => handleFilterChange(column, e.target.value)}
+  style={{
+    width: "100%",
+    padding: "0.5rem",
+    backgroundColor: "#1a1a1a",
+    border: "1px solid #333",
+    borderRadius: "4px",
+    color: "#fbf0df",
+    fontSize: "0.85rem",
+  }}
+/>
+```
+
+### Active Filters Bar
+
+When filters are active, a status bar displays:
+
+```typescript
+{activeFiltersCount > 0 && (
+  <div style={{ padding: "0.75rem 1rem", backgroundColor: "#0f0f0f" }}>
+    <span>Active filters: {activeFiltersCount}</span>
+    <button onClick={clearFilters}>Clear filters</button>
+  </div>
+)}
+```
+
+## Sorting Logic
+
+The component implements intelligent multi-type sorting:
+
+```typescript
+const sortedChanges = useMemo(() => {
+  if (!sortColumn || !sortDirection) {
+    return filteredChanges;
+  }
+
+  return [...filteredChanges].sort((a, b) => {
+    const aValue = a[sortColumn];
+    const bValue = b[sortColumn];
+
+    // Handle null/undefined values
+    if (aValue == null && bValue == null) return 0;
+    if (aValue == null) return 1;
+    if (bValue == null) return -1;
+
+    // Compare values
+    let comparison = 0;
+    if (typeof aValue === "number" && typeof bValue === "number") {
+      comparison = aValue - bValue;
+    } else if (aValue instanceof Date && bValue instanceof Date) {
+      comparison = aValue.getTime() - bValue.getTime();
+    } else {
+      // Try to parse as date (ISO format)
+      const aDate = typeof aValue === "string" ? new Date(aValue) : null;
+      const bDate = typeof bValue === "string" ? new Date(bValue) : null;
+
+      if (aDate && bDate && !isNaN(aDate.getTime()) && !isNaN(bDate.getTime())) {
+        comparison = aDate.getTime() - bDate.getTime();
+      } else {
+        // String comparison
+        comparison = String(aValue).localeCompare(String(bValue));
+      }
+    }
+
+    return sortDirection === "asc" ? comparison : -comparison;
+  });
+}, [filteredChanges, sortColumn, sortDirection]);
+```
+
+### Sort Features
+
+- **Type-aware**: Handles numbers, dates, and strings differently
+- **Null handling**: Null values always sort to the bottom
+- **Date detection**: Automatically parses ISO date strings
+- **Three-state cycle**: Click header to cycle through ascending → descending → no sort
+- **Visual indicators**: Shows ↑ (asc), ↓ (desc), or ↕ (no sort) arrows
+
+### Sort Interaction
+
+```typescript
+const handleSort = (column: string) => {
+  if (sortColumn === column) {
+    // If already sorted by this column, change direction
+    if (sortDirection === "asc") {
+      setSortDirection("desc");
+    } else if (sortDirection === "desc") {
+      setSortColumn(null);
+      setSortDirection(null);
+    }
+  } else {
+    // New column, sort ascending
+    setSortColumn(column);
+    setSortDirection("asc");
+  }
+};
+```
+
+Click sequence: **unsorted** → **ascending** → **descending** → **unsorted**
+
+## Operation Color Coding
+
+The component uses color-coded badges for operation types:
+
+```typescript
+const getOperationColor = (operation: string) => {
+  switch (operation.toUpperCase()) {
+    case "INSERT":
+      return "#10b981"; // green
+    case "UPDATE":
+      return "#3b82f6"; // blue
+    case "DELETE":
+      return "#ef4444"; // red
+    default:
+      return "#6b7280"; // gray
+  }
+};
+```
+
+### Color Meanings
+
+<ResponseField name="INSERT" type="#10b981">
+  Green badge - indicates new row creation
+</ResponseField>
+
+<ResponseField name="UPDATE" type="#3b82f6">
+  Blue badge - indicates row modification
+</ResponseField>
+
+<ResponseField name="DELETE" type="#ef4444">
+  Red badge - indicates row deletion
+</ResponseField>
+
+<ResponseField name="Unknown" type="#6b7280">
+  Gray badge - fallback for unrecognized operations
+</ResponseField>
+
+## Dark Theme Styling
+
+The component uses a comprehensive dark theme with carefully chosen colors:
+
+### Color Palette
+
+- **Background primary**: `#1a1a1a` (main container)
+- **Background secondary**: `#0f0f0f` (header, odd rows)
+- **Background tertiary**: `#151515` (even rows)
+- **Border primary**: `#fbf0df` (main border, accent color)
+- **Border secondary**: `#333` (internal borders)
+- **Text primary**: `#fbf0df` (main text)
+- **Text secondary**: `#64748b` (muted text, null values)
+- **Accent**: `#f3d5a3` (sort indicators, focus states)
+
+### Interactive States
+
+**Hover effects on rows:**
+```typescript
+onMouseEnter={(e) => {
+  e.currentTarget.style.backgroundColor = "#2a2a2a";
+}}
+onMouseLeave={(e) => {
+  e.currentTarget.style.backgroundColor = index % 2 === 0 ? "#1a1a1a" : "#151515";
+}}
+```
+
+**Focus state on inputs:**
+```typescript
+onFocus={(e) => {
+  e.currentTarget.style.borderColor = "#f3d5a3";
+}}
+onBlur={(e) => {
+  e.currentTarget.style.borderColor = "#333";
+}}
+```
+
+### Zebra Striping
+
+Alternating row colors for improved readability:
+```typescript
+backgroundColor: index % 2 === 0 ? "#1a1a1a" : "#151515"
+```
+
+## Empty State
+
+When no changes are available, the component displays a centered message:
+
+```jsx
+<div style={{
+  padding: "3rem",
+  textAlign: "center",
+  color: "#64748b",
+  backgroundColor: "#1a1a1a",
+  borderRadius: "12px",
+  border: "2px solid #fbf0df",
+}}>
+  <p style={{ fontSize: "1.2rem" }}>
+    Waiting for database changes...
+  </p>
+  <p style={{ fontSize: "0.9rem", marginTop: "0.5rem" }}>
+    Changes will appear here in real-time
+  </p>
+</div>
+```
+
+## Usage Example
+
+```typescript
+import { ChangesTable } from './components/ChangesTable';
+import { useState } from 'react';
+
+function MyComponent() {
+  const [changes, setChanges] = useState([
+    {
+      operation: 'INSERT',
+      table: 'users',
+      id: 1,
+      name: 'John Doe',
+      email: 'john@example.com',
+      created_at: '2026-03-04T10:30:00Z'
+    },
+    {
+      operation: 'UPDATE',
+      table: 'users',
+      id: 1,
+      name: 'John Smith',
+      email: 'john@example.com',
+      created_at: '2026-03-04T10:30:00Z'
+    }
+  ]);
+
+  return <ChangesTable changes={changes} />;
+}
+```
+
+## Performance Optimizations
+
+- **useMemo hooks**: Column generation, filtering, and sorting are memoized to prevent unnecessary recalculations
+- **Dependency arrays**: Each memoized value only recomputes when relevant dependencies change
+- **Immutable sorting**: Creates new array with spread operator to avoid mutating filtered results
+
+## Accessibility Features
+
+- **Keyboard navigation**: All interactive elements are keyboard accessible
+- **Visual feedback**: Hover states on sortable headers and rows
+- **Clear indicators**: Sort arrows and filter count provide clear state feedback
+- **Placeholder text**: Input placeholders indicate filtering functionality
+- **Null value display**: Clearly marks null values with italic "null" text
+
+## Dependencies
+
+- `react` (useState, useMemo hooks)

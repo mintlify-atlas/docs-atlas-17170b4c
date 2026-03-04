@@ -1,0 +1,229 @@
+---
+title: 'Database Setup'
+description: 'Configure PostgreSQL for real-time change monitoring with logical replication'
+---
+
+## Overview
+
+PostgreSQL Realtime Monitor requires PostgreSQL to be configured with logical replication enabled. This allows the application to subscribe to database changes in real-time using the `postgres` library.
+
+## PostgreSQL Version Requirements
+
+The application uses **PostgreSQL 16 Alpine** (as specified in docker-compose.yml), but logical replication is supported in PostgreSQL 10+.
+
+<Note>
+Logical replication is a PostgreSQL feature that streams data changes from the database to subscribers. It requires specific configuration settings to work properly.
+</Note>
+
+## Required PostgreSQL Settings
+
+The following PostgreSQL configuration parameters must be set for real-time monitoring:
+
+<CodeGroup>
+```yaml docker-compose.yml
+command: >
+  postgres
+    -c wal_level=logical
+    -c max_wal_senders=10
+    -c max_replication_slots=10
+    -c max_connections=100
+```
+
+```conf postgresql.conf
+wal_level = logical
+max_wal_senders = 10
+max_replication_slots = 10
+max_connections = 100
+```
+</CodeGroup>
+
+### Configuration Parameters Explained
+
+| Parameter | Value | Description |
+|-----------|-------|-------------|
+| `wal_level` | `logical` | Enables logical decoding of WAL (Write-Ahead Log) required for replication |
+| `max_wal_senders` | `10` | Maximum number of concurrent WAL sender processes |
+| `max_replication_slots` | `10` | Maximum number of replication slots for subscribers |
+| `max_connections` | `100` | Maximum concurrent database connections |
+
+<Warning>
+Changing `wal_level` requires a PostgreSQL restart. Plan accordingly for production environments.
+</Warning>
+
+## Publication Setup
+
+The application requires a PostgreSQL publication named `alltables` that includes all tables in the database.
+
+### Creating the Publication
+
+Run the following SQL command to create the publication:
+
+```sql init.sql
+CREATE PUBLICATION alltables FOR ALL TABLES;
+```
+
+<Note>
+The `init.sql` file in the project root automatically creates this publication when using Docker Compose. For manual setups, run this command yourself.
+</Note>
+
+### What is a Publication?
+
+A publication is a set of changes from one or more tables that can be subscribed to by external clients. The `FOR ALL TABLES` clause means:
+
+- All existing tables are included
+- New tables created later are automatically included
+- All DML operations (INSERT, UPDATE, DELETE) are captured
+
+### Verifying the Publication
+
+Check if the publication exists:
+
+```sql
+SELECT * FROM pg_publication WHERE pubname = 'alltables';
+```
+
+View which tables are included:
+
+```sql
+SELECT * FROM pg_publication_tables WHERE pubname = 'alltables';
+```
+
+## Connection Configuration
+
+The database connection is configured in `db.ts` using the `postgres` library:
+
+```typescript db.ts
+import postgres from "postgres"
+
+const DB_HOST = 'localhost'
+const DB_PORT = 5432
+const DB_NAME = 'appdb'
+const DB_USER = 'appuser'
+const DB_PASSWORD = 'secret'
+
+export const sql = postgres({
+    host: DB_HOST,
+    port: DB_PORT,
+    database: DB_NAME,
+    username: DB_USER,
+    password: DB_PASSWORD,
+    publications: 'alltables', // <- key
+})
+```
+
+<Warning>
+The `publications` parameter must match the name of your PostgreSQL publication. The default is `'alltables'`.
+</Warning>
+
+## Testing the Connection
+
+After setting up PostgreSQL and the publication, test the connection:
+
+### 1. Test Basic Connectivity
+
+```bash
+psql -h localhost -p 5432 -U appuser -d appdb
+```
+
+Enter the password when prompted (`secret` by default).
+
+### 2. Verify Logical Replication Settings
+
+Inside psql:
+
+```sql
+SHOW wal_level;
+-- Should return: logical
+
+SHOW max_wal_senders;
+-- Should return: 10
+
+SHOW max_replication_slots;
+-- Should return: 10
+```
+
+### 3. Test the Application
+
+Start the application:
+
+```bash
+bun run dev
+```
+
+You should see:
+
+```
+🚀 Server running at http://localhost:3000
+📡 WebSocket available at ws://localhost:3000/ws
+✅ Realtime subscription ready (connected or reconnected)
+```
+
+### 4. Test Real-time Changes
+
+In a separate terminal, connect to PostgreSQL and make a change:
+
+```sql
+-- Create a test table
+CREATE TABLE test_table (id SERIAL PRIMARY KEY, name TEXT);
+
+-- Insert a record
+INSERT INTO test_table (name) VALUES ('Test');
+```
+
+The application console should show:
+
+```
+📊 Change detected: INSERT on public.test_table
+```
+
+## Troubleshooting
+
+### Connection Refused
+
+<Warning>
+If you see "Connection refused", ensure PostgreSQL is running and accepting connections on the configured host and port.
+</Warning>
+
+```bash
+# Check if PostgreSQL is running (Docker)
+docker ps | grep postgres
+
+# Check PostgreSQL logs
+docker logs postgres-realtime
+```
+
+### Publication Not Found
+
+If you see errors about the publication not existing:
+
+```bash
+# Connect to PostgreSQL
+psql -h localhost -p 5432 -U appuser -d appdb
+
+# Create the publication
+CREATE PUBLICATION alltables FOR ALL TABLES;
+```
+
+### Permission Denied
+
+The database user must have replication permissions:
+
+```sql
+ALTER USER appuser WITH REPLICATION;
+```
+
+### WAL Level Not Logical
+
+If you see errors about logical replication:
+
+1. Update `postgresql.conf` or Docker command with `wal_level=logical`
+2. Restart PostgreSQL
+3. Verify: `SHOW wal_level;`
+
+## Next Steps
+
+After setting up the database:
+
+- [Configure environment variables](/configuration/environment) for your setup
+- [Learn about Docker setup](/configuration/docker) for containerized deployments
+- Review the connection parameters in `db.ts` to match your environment

@@ -1,0 +1,180 @@
+---
+title: "Real-time Monitoring"
+description: "PostgreSQL logical replication for real-time change tracking"
+---
+
+## Overview
+
+PostgreSQL Realtime Monitor uses **logical replication** to capture database changes in real-time. This feature leverages PostgreSQL's built-in replication slots to stream INSERT, UPDATE, and DELETE operations as they happen.
+
+## How Logical Replication Works
+
+Logical replication decodes the Write-Ahead Log (WAL) into a stream of change events. Unlike physical replication (which copies disk blocks), logical replication provides:
+
+- Row-level change data with operation type
+- Table and schema information
+- Old and new values for updates
+- Selective subscription to specific tables or patterns
+
+<Info>
+  PostgreSQL must be configured with `wal_level=logical` to enable logical replication.
+</Info>
+
+## The `sql.subscribe()` API
+
+The application uses the `postgres` library's subscription API to listen for database changes:
+
+```typescript src/index.ts
+// Subscribe to PostgreSQL changes
+const { unsubscribe } = await sql.subscribe(
+  "*", // pattern: all (all operations and tables)
+  (row, { command, relation }) => {
+    // Format the relation (can be object or string)
+    const tableName =
+      typeof relation === "string"
+        ? relation
+        : relation?.table
+          ? `${relation.schema || "public"}.${relation.table}`
+          : JSON.stringify(relation);
+
+    // Create an object that combines operation, table and row data
+    const rows = Array.isArray(row) ? row : [row];
+    const newChanges = rows.map((r) => ({
+      operation: command.toUpperCase(),
+      table: tableName,
+      ...r,
+    }));
+
+    // Add new changes to the accumulative array
+    allChanges.push(...newChanges);
+
+    // Send to all WebSocket clients
+    broadcast({
+      type: "change",
+      data: newChanges,
+      total: allChanges.length,
+    });
+
+    console.log(
+      `📊 Change detected: ${command.toUpperCase()} on ${tableName}`
+    );
+  },
+  () => {
+    console.log("✅ Realtime subscription ready (connected or reconnected)");
+  }
+);
+```
+
+### API Parameters
+
+<ParamField path="pattern" type="string" required>
+  The subscription pattern. Use `"*"` to subscribe to all operations and tables, or specify a table name like `"users"` for selective monitoring.
+</ParamField>
+
+<ParamField path="callback" type="function" required>
+  Callback function invoked for each change. Receives:
+  - `row`: The changed row data (or array of rows)
+  - `command`: Operation type (insert, update, delete)
+  - `relation`: Table information (schema and table name)
+</ParamField>
+
+<ParamField path="onConnect" type="function">
+  Callback invoked when the subscription is ready or reconnects.
+</ParamField>
+
+## Pattern Matching
+
+The wildcard pattern `"*"` subscribes to **all operations** on **all tables**:
+
+<CodeGroup>
+```typescript All Tables
+await sql.subscribe("*", callback);
+```
+
+```typescript Specific Table
+await sql.subscribe("users", callback);
+```
+
+```typescript Schema-Qualified
+await sql.subscribe("public.orders", callback);
+```
+</CodeGroup>
+
+<Warning>
+  Using `"*"` in production may generate high volumes of events. Consider filtering by specific tables for better performance.
+</Warning>
+
+## Captured Data
+
+Each change event contains:
+
+<ResponseField name="operation" type="string">
+  The database operation: `INSERT`, `UPDATE`, or `DELETE`
+</ResponseField>
+
+<ResponseField name="table" type="string">
+  Fully qualified table name in format `schema.table` (e.g., `public.users`)
+</ResponseField>
+
+<ResponseField name="...row" type="object">
+  All column values from the changed row spread into the change object
+</ResponseField>
+
+### Example Change Object
+
+```json
+{
+  "operation": "INSERT",
+  "table": "public.users",
+  "id": 42,
+  "name": "Alice",
+  "email": "alice@example.com",
+  "created_at": "2026-03-04T10:30:00.000Z"
+}
+```
+
+## Data Accumulation
+
+All changes are stored in an in-memory array for the lifetime of the server:
+
+```typescript src/index.ts
+// Accumulative array for all changes
+const allChanges: Array<Record<string, any>> = [];
+
+// Inside the subscription callback
+allChanges.push(...newChanges);
+```
+
+This allows:
+- New clients to receive historical changes on connect
+- Full replay of database activity since server start
+- Persistent monitoring across multiple client sessions
+
+<Note>
+  Changes are kept in memory only. Restarting the server clears the change history.
+</Note>
+
+## Connection Management
+
+The subscription automatically handles:
+- Initial connection to PostgreSQL
+- Reconnection on database disconnect
+- Cleanup via the `unsubscribe()` function
+
+```typescript
+const { unsubscribe } = await sql.subscribe(/* ... */);
+
+// Later, to stop monitoring:
+unsubscribe();
+```
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="WebSocket Architecture" icon="signal" href="/features/websocket-connection">
+    Learn how changes are broadcast to clients
+  </Card>
+  <Card title="Table Interface" icon="table" href="/features/table-interface">
+    Explore the React component for displaying changes
+  </Card>
+</CardGroup>

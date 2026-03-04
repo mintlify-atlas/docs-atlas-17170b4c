@@ -1,0 +1,680 @@
+---
+title: Production Deployment
+description: Deploy PostgreSQL Realtime Monitor to production with security, performance, and scalability best practices
+---
+
+## Overview
+
+Deploying PostgreSQL Realtime Monitor to production requires careful consideration of environment configuration, security, performance, and monitoring. This guide covers best practices for production deployments.
+
+## Environment Variables
+
+### Setting Production Mode
+
+The application checks `NODE_ENV` to determine whether to enable development features. Set this environment variable in production:
+
+```bash
+export NODE_ENV=production
+```
+
+<Warning>
+**Critical**: Setting `NODE_ENV=production` disables Hot Module Reloading (HMR) and console echo features that should not run in production.
+</Warning>
+
+From `src/index.ts:74-80`:
+
+```typescript src/index.ts
+development: process.env.NODE_ENV !== "production" && {
+  // Enable browser hot reloading in development
+  hmr: true,
+
+  // Echo console logs from the browser to the server
+  console: true,
+}
+```
+
+When `NODE_ENV=production`, the `development` object evaluates to `false`, disabling both HMR and console echo.
+
+### Database Configuration
+
+Move database credentials from hardcoded values in `db.ts` to environment variables:
+
+**Development** (hardcoded in `db.ts`):
+```typescript
+const DB_HOST = 'localhost'
+const DB_PORT = 5432
+const DB_NAME = 'appdb'
+const DB_USER = 'appuser'
+const DB_PASSWORD = 'secret'
+```
+
+**Production** (using environment variables):
+
+```typescript db.ts
+import postgres from "postgres"
+
+const DB_HOST = process.env.DB_HOST || 'localhost'
+const DB_PORT = parseInt(process.env.DB_PORT || '5432', 10)
+const DB_NAME = process.env.DB_NAME || 'appdb'
+const DB_USER = process.env.DB_USER || 'appuser'
+const DB_PASSWORD = process.env.DB_PASSWORD || 'secret'
+const DB_PUBLICATION = process.env.DB_PUBLICATION || 'alltables'
+
+export const sql = postgres({
+    host: DB_HOST,
+    port: DB_PORT,
+    database: DB_NAME,
+    username: DB_USER,
+    password: DB_PASSWORD,
+    publications: DB_PUBLICATION,
+})
+```
+
+Set these variables in your production environment:
+
+```bash .env.production
+NODE_ENV=production
+DB_HOST=your-postgres-host.example.com
+DB_PORT=5432
+DB_NAME=production_db
+DB_USER=prod_user
+DB_PASSWORD=strong_random_password_here
+DB_PUBLICATION=alltables
+PORT=3000
+```
+
+<Info>
+Never commit `.env.production` to version control. Use secret management services provided by your hosting platform.
+</Info>
+
+### Server Configuration
+
+Add support for custom port configuration:
+
+```typescript src/index.ts
+const server = serve({
+  port: parseInt(process.env.PORT || '3000', 10),
+  // ... rest of configuration
+});
+```
+
+## Building for Production
+
+### Build Script
+
+Add a production build script to `package.json`:
+
+```json package.json
+{
+  "scripts": {
+    "dev": "bun run src/index.ts",
+    "start": "NODE_ENV=production bun run src/index.ts",
+    "build": "bun build src/index.ts --outdir ./dist --target bun",
+    "prod": "NODE_ENV=production bun run dist/index.js"
+  }
+}
+```
+
+### Build Process
+
+1. **Install production dependencies**:
+   ```bash
+   bun install --production
+   ```
+
+2. **Build the application** (optional, Bun can run TypeScript directly):
+   ```bash
+   bun run build
+   ```
+
+3. **Run production server**:
+   ```bash
+   bun run start
+   ```
+
+<Note>
+Bun can execute TypeScript directly without transpilation, so building is optional. However, building can reduce startup time slightly.
+</Note>
+
+## Security Considerations
+
+### Database Credentials
+
+<Warning>
+**Never** expose database credentials in:
+- Source code repositories
+- Client-side code
+- Application logs
+- Error messages
+</Warning>
+
+**Best Practices**:
+
+1. **Use Environment Variables**: Store credentials in environment variables or secret managers
+2. **Rotate Credentials**: Regularly update database passwords
+3. **Least Privilege**: Grant only necessary permissions to the database user
+4. **Connection Encryption**: Use SSL/TLS for database connections
+
+```typescript db.ts
+export const sql = postgres({
+    host: DB_HOST,
+    port: DB_PORT,
+    database: DB_NAME,
+    username: DB_USER,
+    password: DB_PASSWORD,
+    publications: DB_PUBLICATION,
+    ssl: process.env.NODE_ENV === 'production' ? 'require' : false,
+})
+```
+
+### WebSocket Security
+
+The current implementation (from `src/index.ts:27-32`) accepts all WebSocket connections:
+
+```typescript src/index.ts
+if (url.pathname === "/ws") {
+  const success = server.upgrade(req);
+  if (success) {
+    return undefined;
+  }
+  return new Response("WebSocket upgrade failed", { status: 500 });
+}
+```
+
+**Production Enhancements**:
+
+1. **Authentication**: Validate tokens before upgrading connections
+2. **Rate Limiting**: Prevent abuse by limiting connections per IP
+3. **Origin Checking**: Validate the `Origin` header
+4. **WSS Protocol**: Use secure WebSocket (WSS) with HTTPS
+
+```typescript
+// Example: Add authentication
+if (url.pathname === "/ws") {
+  const token = new URL(req.url).searchParams.get('token');
+  if (!isValidToken(token)) {
+    return new Response("Unauthorized", { status: 401 });
+  }
+  
+  const success = server.upgrade(req);
+  if (success) return undefined;
+  return new Response("WebSocket upgrade failed", { status: 500 });
+}
+```
+
+### HTTPS/WSS
+
+<Warning>
+Always use HTTPS and WSS (secure WebSocket) in production to encrypt data in transit.
+</Warning>
+
+Options for enabling HTTPS:
+
+1. **Reverse Proxy**: Use nginx or Caddy as a reverse proxy with SSL termination
+2. **Bun TLS**: Configure Bun with TLS certificates
+3. **Load Balancer**: Use cloud load balancers (AWS ALB, GCP LB) with SSL
+
+**Example with nginx**:
+
+```nginx
+server {
+    listen 443 ssl http2;
+    server_name monitor.example.com;
+    
+    ssl_certificate /etc/letsencrypt/live/monitor.example.com/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/monitor.example.com/privkey.pem;
+    
+    location / {
+        proxy_pass http://localhost:3000;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+}
+```
+
+### Input Validation
+
+The WebSocket message handler currently logs all messages:
+
+```typescript src/index.ts:50-53
+message(ws: any, message: string | Buffer) {
+  // Clients can send messages if needed
+  console.log("Message received:", message);
+}
+```
+
+**Production Hardening**:
+- Validate and sanitize all incoming messages
+- Limit message size to prevent memory exhaustion
+- Implement message rate limiting per client
+
+## Performance Optimization
+
+### Memory Management
+
+The current implementation stores all changes in memory:
+
+```typescript src/index.ts:6
+const allChanges: Array<Record<string, any>> = [];
+```
+
+<Warning>
+Unbounded memory growth: The `allChanges` array grows indefinitely and can cause memory issues over time.
+</Warning>
+
+**Production Solutions**:
+
+1. **Implement a Ring Buffer**: Keep only the last N changes
+   ```typescript
+   const MAX_CHANGES = 10000;
+   
+   if (allChanges.length >= MAX_CHANGES) {
+     allChanges.shift(); // Remove oldest
+   }
+   allChanges.push(...newChanges);
+   ```
+
+2. **Time-based Expiration**: Remove changes older than X hours
+   ```typescript
+   const RETENTION_HOURS = 24;
+   const cutoffTime = Date.now() - (RETENTION_HOURS * 60 * 60 * 1000);
+   
+   allChanges = allChanges.filter(change => 
+     change.timestamp > cutoffTime
+   );
+   ```
+
+3. **Persist to Database**: Store changes in PostgreSQL or Redis
+
+4. **Disable History**: Remove `allChanges` array entirely if not needed
+
+### Connection Management
+
+The server maintains a set of active WebSocket clients:
+
+```typescript src/index.ts:9
+const clients = new Set<any>();
+```
+
+**Optimization Tips**:
+
+1. **Connection Limits**: Limit maximum concurrent connections
+   ```typescript
+   const MAX_CLIENTS = 1000;
+   
+   open(ws: any) {
+     if (clients.size >= MAX_CLIENTS) {
+       ws.close(1008, "Server at capacity");
+       return;
+     }
+     clients.add(ws);
+   }
+   ```
+
+2. **Heartbeat/Ping**: Detect and close stale connections
+   ```typescript
+   // Send periodic ping to keep connections alive
+   setInterval(() => {
+     clients.forEach(client => {
+       if (client.readyState === 1) {
+         client.ping();
+       }
+     });
+   }, 30000); // Every 30 seconds
+   ```
+
+3. **Graceful Shutdown**: Close connections properly on server shutdown
+   ```typescript
+   process.on('SIGTERM', () => {
+     clients.forEach(client => client.close(1001, "Server shutting down"));
+     unsubscribe(); // Close PostgreSQL subscription
+     process.exit(0);
+   });
+   ```
+
+### Database Subscription
+
+The application subscribes to all tables with the wildcard pattern:
+
+```typescript src/index.ts:87-88
+const { unsubscribe } = await sql.subscribe(
+  "*", // pattern: all (all operations and tables)
+```
+
+**Performance Considerations**:
+
+1. **Selective Subscriptions**: Subscribe only to specific tables if possible
+   ```typescript
+   await sql.subscribe(
+     'public.users,public.orders', // Specific tables
+     callback
+   );
+   ```
+
+2. **Replication Slot Management**: Monitor replication lag
+   ```sql
+   SELECT * FROM pg_replication_slots;
+   ```
+
+3. **WAL Size**: Ensure Write-Ahead Log doesn't grow too large
+
+### Broadcasting Efficiency
+
+The current broadcast function from `src/index.ts:12-19`:
+
+```typescript
+function broadcast(data: any) {
+  const message = JSON.stringify(data);
+  clients.forEach((client: any) => {
+    if (client.readyState === 1) { // OPEN
+      client.send(message);
+    }
+  });
+}
+```
+
+**Optimization**: JSON serialization happens once before the loop (already efficient). Consider:
+- Batch multiple changes before broadcasting
+- Compress large messages
+- Debounce rapid updates
+
+## Monitoring and Logging
+
+### Production Logging
+
+Replace console.log with structured logging:
+
+```typescript
+import { createLogger } from 'winston'; // or pino, bunyan
+
+const logger = createLogger({
+  level: process.env.LOG_LEVEL || 'info',
+  format: format.json(),
+  transports: [
+    new transports.File({ filename: 'error.log', level: 'error' }),
+    new transports.File({ filename: 'combined.log' }),
+  ],
+});
+
+// Replace console.log calls
+logger.info('Server running', { url: server.url });
+logger.info('WebSocket client connected', { total: clients.size });
+logger.info('Change detected', { command, tableName });
+```
+
+### Key Metrics to Monitor
+
+<AccordionGroup>
+  <Accordion title="Application Metrics">
+    - **Active WebSocket Connections**: `clients.size`
+    - **Changes Per Second**: Rate of database change events
+    - **Memory Usage**: Process memory consumption
+    - **CPU Usage**: Server CPU utilization
+    - **Response Times**: API endpoint latency
+  </Accordion>
+  
+  <Accordion title="Database Metrics">
+    - **Replication Lag**: Delay in receiving changes
+    - **Replication Slot Status**: Active/inactive slots
+    - **WAL Size**: Write-Ahead Log growth
+    - **Connection Pool**: Available connections
+    - **Query Performance**: Slow queries
+  </Accordion>
+  
+  <Accordion title="System Metrics">
+    - **Network I/O**: Bandwidth usage
+    - **Disk I/O**: Read/write operations
+    - **Error Rates**: 5xx errors, WebSocket failures
+    - **Uptime**: Service availability
+  </Accordion>
+</AccordionGroup>
+
+### Health Check Endpoint
+
+Add a health check endpoint for load balancers:
+
+```typescript src/index.ts
+if (url.pathname === "/health") {
+  return Response.json({ 
+    status: "healthy",
+    uptime: process.uptime(),
+    clients: clients.size,
+    changes: allChanges.length,
+    database: sql.connection ? "connected" : "disconnected"
+  });
+}
+```
+
+### Error Tracking
+
+Integrate error tracking (Sentry, Rollbar, etc.):
+
+```typescript
+import * as Sentry from "@sentry/bun";
+
+if (process.env.NODE_ENV === 'production') {
+  Sentry.init({
+    dsn: process.env.SENTRY_DSN,
+    environment: 'production',
+  });
+}
+```
+
+## Scaling Considerations
+
+### Horizontal Scaling
+
+<Warning>
+The current in-memory architecture (`allChanges` array, `clients` Set) does not support horizontal scaling across multiple server instances.
+</Warning>
+
+**Solutions for Multi-Instance Deployment**:
+
+1. **Redis Pub/Sub**: Share changes between instances
+   ```typescript
+   import { createClient } from 'redis';
+   
+   const redis = createClient({ url: process.env.REDIS_URL });
+   
+   // Publish changes
+   redis.publish('db-changes', JSON.stringify(newChanges));
+   
+   // Subscribe to changes from other instances
+   redis.subscribe('db-changes', (message) => {
+     broadcast(JSON.parse(message));
+   });
+   ```
+
+2. **Sticky Sessions**: Route clients to same instance (load balancer)
+
+3. **Shared State**: Use Redis for `allChanges` storage
+   ```typescript
+   // Store in Redis instead of memory
+   await redis.lpush('changes', JSON.stringify(newChanges));
+   await redis.ltrim('changes', 0, 9999); // Keep last 10k
+   ```
+
+### Database Replication
+
+For high availability:
+
+1. **PostgreSQL Replicas**: Read from replicas, write to primary
+2. **Replication Slots**: One per application instance
+3. **Failover**: Automatic failover to standby database
+
+### Load Balancing
+
+Configuration for WebSocket load balancing:
+
+- **Sticky Sessions**: Required unless using shared state
+- **Connection Draining**: Gracefully close connections during deployments
+- **Health Checks**: Use `/health` endpoint
+
+**AWS ALB Example**:
+```json
+{
+  "Target Group": {
+    "Stickiness": "enabled",
+    "HealthCheck": "/health",
+    "Deregistration Delay": 30
+  }
+}
+```
+
+## Deployment Checklist
+
+<Steps>
+  <Step title="Environment Configuration">
+    - [ ] Set `NODE_ENV=production`
+    - [ ] Configure database credentials via environment variables
+    - [ ] Set custom port if needed
+    - [ ] Configure SSL for database connection
+  </Step>
+  
+  <Step title="Security Hardening">
+    - [ ] Enable HTTPS/WSS
+    - [ ] Implement WebSocket authentication
+    - [ ] Add rate limiting
+    - [ ] Validate Origin header
+    - [ ] Remove sensitive data from logs
+  </Step>
+  
+  <Step title="Performance Optimization">
+    - [ ] Implement memory limits (ring buffer or TTL)
+    - [ ] Add connection limits
+    - [ ] Configure heartbeat/ping
+    - [ ] Optimize database subscription pattern
+  </Step>
+  
+  <Step title="Monitoring Setup">
+    - [ ] Configure structured logging
+    - [ ] Add health check endpoint
+    - [ ] Set up error tracking (Sentry, etc.)
+    - [ ] Monitor key metrics (connections, memory, CPU)
+    - [ ] Configure alerts for critical issues
+  </Step>
+  
+  <Step title="Database Configuration">
+    - [ ] Enable logical replication (`wal_level=logical`)
+    - [ ] Create publication for monitored tables
+    - [ ] Set appropriate `max_replication_slots`
+    - [ ] Configure connection pooling
+    - [ ] Set up database backups
+  </Step>
+  
+  <Step title="Deployment Process">
+    - [ ] Test in staging environment
+    - [ ] Perform smoke tests
+    - [ ] Set up zero-downtime deployments
+    - [ ] Configure automatic restarts on failure
+    - [ ] Document rollback procedure
+  </Step>
+</Steps>
+
+## Example Production Setup
+
+### Docker Deployment
+
+**Dockerfile**:
+```dockerfile
+FROM oven/bun:1-alpine
+
+WORKDIR /app
+
+COPY package.json bun.lockb ./
+RUN bun install --production
+
+COPY . .
+
+EXPOSE 3000
+
+ENV NODE_ENV=production
+
+CMD ["bun", "run", "src/index.ts"]
+```
+
+**docker-compose.production.yml**:
+```yaml
+version: "3.9"
+
+services:
+  app:
+    build: .
+    ports:
+      - "3000:3000"
+    environment:
+      NODE_ENV: production
+      DB_HOST: db
+      DB_PORT: 5432
+      DB_NAME: production_db
+      DB_USER: ${DB_USER}
+      DB_PASSWORD: ${DB_PASSWORD}
+    restart: unless-stopped
+    depends_on:
+      - db
+    
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: production_db
+      POSTGRES_USER: ${DB_USER}
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    command: >
+      postgres
+        -c wal_level=logical
+        -c max_wal_senders=10
+        -c max_replication_slots=10
+    restart: unless-stopped
+
+volumes:
+  postgres_data:
+```
+
+### Systemd Service
+
+**pgmonitor.service**:
+```ini
+[Unit]
+Description=PostgreSQL Realtime Monitor
+After=network.target postgresql.service
+
+[Service]
+Type=simple
+User=pgmonitor
+WorkingDirectory=/opt/pgmonitor
+Environment="NODE_ENV=production"
+EnvironmentFile=/opt/pgmonitor/.env.production
+ExecStart=/usr/local/bin/bun run src/index.ts
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target
+```
+
+Enable and start:
+```bash
+sudo systemctl enable pgmonitor
+sudo systemctl start pgmonitor
+sudo systemctl status pgmonitor
+```
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Local Development" icon="laptop-code" href="/deployment/local-development">
+    Return to local development setup and debugging
+  </Card>
+  
+  <Card title="Architecture" icon="diagram-project" href="/architecture">
+    Learn about the system architecture and data flow
+  </Card>
+</CardGroup>

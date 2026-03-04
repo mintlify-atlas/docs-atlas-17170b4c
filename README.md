@@ -1,28 +1,15 @@
-# Mintlify Starter Kit
+# PostgreSQL Realtime Monitor Documentation
 
-Use the starter kit to get your docs deployed and ready to customize.
+Documentation for PostgreSQL Realtime Monitor - a real-time monitoring tool for PostgreSQL database changes using Bun, WebSocket, and React.
 
-Click the green **Use this template** button at the top of this repo to copy the Mintlify starter kit. The starter kit contains examples with
+## Features
 
-- Guide pages
-- Navigation
-- Customizations
-- API reference pages
-- Use of popular components
-
-**[Follow the full quickstart guide](https://starter.mintlify.com/quickstart)**
-
-## AI-assisted writing
-
-Set up your AI coding tool to work with Mintlify:
-
-```bash
-npx skills add https://mintlify.com/docs
-```
-
-This command installs Mintlify's documentation skill for your configured AI tools like Claude Code, Cursor, Windsurf, and others. The skill includes component reference, writing standards, and workflow guidance.
-
-See the [AI tools guides](/ai-tools) for tool-specific setup.
+- Real-time monitoring of PostgreSQL changes (INSERT, UPDATE, DELETE)
+- WebSocket server with automatic reconnection
+- Sortable and filterable data table
+- Modern dark theme UI with live connection status
+- Built with Bun for high performance
+- Hot Module Reloading for fast development
 
 ## Development
 

@@ -1,0 +1,287 @@
+---
+title: 'Environment Configuration'
+description: 'Configure database connection parameters and server settings'
+---
+
+## Overview
+
+PostgreSQL Realtime Monitor uses hardcoded configuration values in `db.ts` and `src/index.ts`. This guide shows you how to customize these settings for your environment.
+
+## Database Connection Parameters
+
+The database connection is configured in `db.ts` with the following default values:
+
+```typescript db.ts
+const DB_HOST = 'localhost'
+const DB_PORT = 5432
+const DB_NAME = 'appdb'
+const DB_USER = 'appuser'
+const DB_PASSWORD = 'secret'
+```
+
+### Configuration Parameters
+
+| Parameter | Default Value | Description |
+|-----------|--------------|-------------|
+| `DB_HOST` | `'localhost'` | PostgreSQL server hostname or IP address |
+| `DB_PORT` | `5432` | PostgreSQL server port |
+| `DB_NAME` | `'appdb'` | Database name to connect to |
+| `DB_USER` | `'appuser'` | PostgreSQL username |
+| `DB_PASSWORD` | `'secret'` | PostgreSQL password |
+
+<Note>
+These values are hardcoded in the source. To change them, edit `db.ts` directly and restart the application.
+</Note>
+
+### Full Connection Configuration
+
+The complete postgres connection configuration:
+
+```typescript db.ts
+import postgres from "postgres"
+
+const DB_HOST = 'localhost'
+const DB_PORT = 5432
+const DB_NAME = 'appdb'
+const DB_USER = 'appuser'
+const DB_PASSWORD = 'secret'
+
+export const sql = postgres({
+    host: DB_HOST,
+    port: DB_PORT,
+    database: DB_NAME,
+    username: DB_USER,
+    password: DB_PASSWORD,
+    publications: 'alltables', // Publication name
+})
+```
+
+## Server Port Configuration
+
+The web server and WebSocket port is configured in `src/index.ts`:
+
+```typescript src/index.ts
+const server = serve({
+  port: 3000,
+  // ... other configuration
+});
+```
+
+### Default Server Settings
+
+| Setting | Default Value | Description |
+|---------|--------------|-------------|
+| Server Port | `3000` | HTTP server and WebSocket port |
+| WebSocket Path | `/ws` | WebSocket endpoint path |
+| API Path | `/api/changes` | REST API endpoint for fetching all changes |
+
+<Warning>
+Changing the server port requires updating client connections. The WebSocket URL will be `ws://localhost:PORT/ws`.
+</Warning>
+
+## Customizing for Your Environment
+
+### Development Environment
+
+For local development with default Docker Compose setup:
+
+```typescript db.ts
+const DB_HOST = 'localhost'  // Docker exposes PostgreSQL on localhost
+const DB_PORT = 5432         // Default PostgreSQL port
+const DB_NAME = 'appdb'      // Matches POSTGRES_DB in docker-compose.yml
+const DB_USER = 'appuser'    // Matches POSTGRES_USER in docker-compose.yml
+const DB_PASSWORD = 'secret' // Matches POSTGRES_PASSWORD in docker-compose.yml
+```
+
+### Production Environment
+
+For production with a remote PostgreSQL server:
+
+```typescript db.ts
+const DB_HOST = 'db.production.example.com'
+const DB_PORT = 5432
+const DB_NAME = 'production_db'
+const DB_USER = 'prod_user'
+const DB_PASSWORD = 'strong_password_here'
+```
+
+<Warning>
+Never commit production credentials to version control. Consider using environment variables or a secrets management system.
+</Warning>
+
+### Using a Different Server Port
+
+To change the server port, edit `src/index.ts`:
+
+```typescript src/index.ts
+const server = serve({
+  port: 8080, // Changed from 3000
+  // ... rest of configuration
+});
+```
+
+Access the application at `http://localhost:8080` and WebSocket at `ws://localhost:8080/ws`.
+
+## Development vs Production Settings
+
+The application automatically detects the environment and enables development features:
+
+```typescript src/index.ts
+const server = serve({
+  // ... other settings
+  
+  development: process.env.NODE_ENV !== "production" && {
+    // Enable browser hot reloading in development
+    hmr: true,
+
+    // Echo console logs from the browser to the server
+    console: true,
+  },
+});
+```
+
+### Development Mode Features
+
+| Feature | Enabled When | Description |
+|---------|-------------|-------------|
+| Hot Module Reload (HMR) | `NODE_ENV !== "production"` | Automatically reloads browser on code changes |
+| Console Echoing | `NODE_ENV !== "production"` | Mirrors browser console logs to server |
+
+### Running in Production Mode
+
+Set the `NODE_ENV` environment variable:
+
+```bash
+NODE_ENV=production bun run dev
+```
+
+This disables HMR and console echoing for better performance.
+
+<Note>
+In production, HMR and console echoing are disabled to reduce overhead and improve performance.
+</Note>
+
+## Matching Docker Configuration
+
+The default values in `db.ts` match the Docker Compose configuration in `docker-compose.yml`:
+
+<CodeGroup>
+```typescript db.ts
+const DB_NAME = 'appdb'
+const DB_USER = 'appuser'
+const DB_PASSWORD = 'secret'
+```
+
+```yaml docker-compose.yml
+environment:
+  POSTGRES_DB: appdb
+  POSTGRES_USER: appuser
+  POSTGRES_PASSWORD: secret
+```
+</CodeGroup>
+
+<Warning>
+If you modify the Docker Compose environment variables, you must also update `db.ts` to match. The values must be identical for the connection to work.
+</Warning>
+
+## Connection String Alternative
+
+While the application uses individual parameters, the `postgres` library also supports connection strings:
+
+```typescript
+// Alternative format (not used in this project)
+export const sql = postgres(
+  'postgres://appuser:secret@localhost:5432/appdb',
+  { publications: 'alltables' }
+)
+```
+
+## Testing Your Configuration
+
+After modifying the configuration:
+
+### 1. Verify Database Connection
+
+Test the connection using psql:
+
+```bash
+psql -h localhost -p 5432 -U appuser -d appdb
+```
+
+### 2. Start the Application
+
+```bash
+bun run dev
+```
+
+Look for the success messages:
+
+```
+🚀 Server running at http://localhost:3000
+📡 WebSocket available at ws://localhost:3000/ws
+✅ Realtime subscription ready (connected or reconnected)
+```
+
+### 3. Check for Errors
+
+Common connection errors:
+
+**Connection refused:**
+```
+Error: connect ECONNREFUSED 127.0.0.1:5432
+```
+→ PostgreSQL is not running or not accepting connections
+
+**Authentication failed:**
+```
+Error: password authentication failed for user "appuser"
+```
+→ Wrong username or password in `db.ts`
+
+**Database does not exist:**
+```
+Error: database "appdb" does not exist
+```
+→ Wrong database name or database not created
+
+## Security Best Practices
+
+<Warning>
+The default configuration uses weak credentials (`secret`) suitable only for development. Always use strong passwords in production.
+</Warning>
+
+### Recommendations
+
+1. **Use strong passwords** - Generate random, complex passwords for production
+2. **Don't commit credentials** - Keep sensitive values out of version control
+3. **Use environment variables** - Consider refactoring to use process.env
+4. **Restrict network access** - Use firewalls to limit database access
+5. **Enable SSL/TLS** - Use encrypted connections for production databases
+
+### Example: Refactoring to Use Environment Variables
+
+For better security, you could refactor `db.ts` to:
+
+```typescript db.ts
+const DB_HOST = process.env.DB_HOST || 'localhost'
+const DB_PORT = parseInt(process.env.DB_PORT || '5432')
+const DB_NAME = process.env.DB_NAME || 'appdb'
+const DB_USER = process.env.DB_USER || 'appuser'
+const DB_PASSWORD = process.env.DB_PASSWORD || 'secret'
+```
+
+Then use a `.env` file (excluded from git):
+
+```bash .env
+DB_HOST=localhost
+DB_PORT=5432
+DB_NAME=appdb
+DB_USER=appuser
+DB_PASSWORD=secret
+```
+
+## Next Steps
+
+- [Set up PostgreSQL with Docker](/configuration/docker)
+- [Configure database for logical replication](/configuration/database-setup)
+- Review the `postgres` library [documentation](https://github.com/porsager/postgres) for advanced options

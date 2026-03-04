@@ -1,0 +1,421 @@
+---
+title: 'WebSocket API'
+description: 'Real-time WebSocket API for streaming PostgreSQL database changes'
+---
+
+## Overview
+
+The WebSocket API provides a persistent, bi-directional connection for receiving real-time database change notifications. When a change occurs in PostgreSQL, it's immediately broadcast to all connected WebSocket clients.
+
+## Connection
+
+### Endpoint
+
+```
+ws://localhost:3000/ws
+```
+
+### Establishing a Connection
+
+<CodeGroup>
+
+```javascript Browser
+const ws = new WebSocket('ws://localhost:3000/ws');
+
+ws.onopen = () => {
+  console.log('Connected to WebSocket server');
+};
+
+ws.onmessage = (event) => {
+  const message = JSON.parse(event.data);
+  console.log('Received:', message);
+};
+
+ws.onerror = (error) => {
+  console.error('WebSocket error:', error);
+};
+
+ws.onclose = () => {
+  console.log('Disconnected from WebSocket server');
+};
+```
+
+```typescript React
+import { useEffect, useRef, useState } from 'react';
+
+function useWebSocket() {
+  const wsRef = useRef<WebSocket | null>(null);
+  const [connected, setConnected] = useState(false);
+  const [changes, setChanges] = useState([]);
+
+  useEffect(() => {
+    const ws = new WebSocket('ws://localhost:3000/ws');
+    wsRef.current = ws;
+
+    ws.onopen = () => {
+      console.log('Connected to WebSocket server');
+      setConnected(true);
+    };
+
+    ws.onmessage = (event) => {
+      const message = JSON.parse(event.data);
+      
+      if (message.type === 'initial') {
+        setChanges(message.data);
+      } else if (message.type === 'change') {
+        setChanges((prev) => [...prev, ...message.data]);
+      }
+    };
+
+    ws.onclose = () => {
+      setConnected(false);
+      wsRef.current = null;
+    };
+
+    return () => {
+      ws.close();
+    };
+  }, []);
+
+  return { connected, changes };
+}
+```
+
+```python Python
+import websocket
+import json
+
+def on_message(ws, message):
+    data = json.loads(message)
+    print(f"Received: {data}")
+
+def on_error(ws, error):
+    print(f"Error: {error}")
+
+def on_close(ws, close_status_code, close_msg):
+    print("Connection closed")
+
+def on_open(ws):
+    print("Connected to WebSocket server")
+
+ws = websocket.WebSocketApp(
+    "ws://localhost:3000/ws",
+    on_open=on_open,
+    on_message=on_message,
+    on_error=on_error,
+    on_close=on_close
+)
+
+ws.run_forever()
+```
+
+</CodeGroup>
+
+## Message Types
+
+The WebSocket server sends two types of messages:
+
+### Initial Message
+
+Sent immediately when a client connects. Contains all accumulated changes from server startup.
+
+<ResponseField name="type" type="string" required>
+  Always `"initial"` for this message type
+</ResponseField>
+
+<ResponseField name="data" type="array" required>
+  Array of all accumulated change objects since server started
+</ResponseField>
+
+#### Example
+
+```json
+{
+  "type": "initial",
+  "data": [
+    {
+      "operation": "INSERT",
+      "table": "public.users",
+      "id": 1,
+      "name": "John Doe",
+      "email": "john@example.com"
+    },
+    {
+      "operation": "UPDATE",
+      "table": "public.users",
+      "id": 1,
+      "name": "John Smith",
+      "email": "john@example.com"
+    }
+  ]
+}
+```
+
+### Change Message
+
+Sent in real-time whenever a database change is detected. Broadcast to all connected clients simultaneously.
+
+<ResponseField name="type" type="string" required>
+  Always `"change"` for this message type
+</ResponseField>
+
+<ResponseField name="data" type="array" required>
+  Array of new change objects (usually contains a single change, but may contain multiple if a query affects multiple rows)
+</ResponseField>
+
+<ResponseField name="total" type="number" required>
+  Total count of all changes accumulated on the server since startup
+</ResponseField>
+
+#### Example
+
+```json
+{
+  "type": "change",
+  "data": [
+    {
+      "operation": "INSERT",
+      "table": "public.products",
+      "id": 42,
+      "name": "Widget",
+      "price": 19.99,
+      "created_at": "2026-03-04T10:30:00Z"
+    }
+  ],
+  "total": 15
+}
+```
+
+## Change Object Structure
+
+Each change object in the `data` array contains:
+
+<ResponseField name="operation" type="string" required>
+  The database operation: `INSERT`, `UPDATE`, or `DELETE`
+</ResponseField>
+
+<ResponseField name="table" type="string" required>
+  Fully-qualified table name in format `schema.table` (e.g., `public.users`)
+</ResponseField>
+
+<ResponseField name="[column]" type="any">
+  Additional fields represent column data from the affected row. Fields vary based on your table schema.
+</ResponseField>
+
+## Implementation Details
+
+### Server-Side Implementation
+
+From `src/index.ts:49-72`:
+
+```typescript
+websocket: {
+  message(ws: any, message: string | Buffer) {
+    // Clients can send messages if needed
+    console.log("Message received:", message);
+  },
+  open(ws: any) {
+    clients.add(ws);
+    console.log("WebSocket client connected. Total:", clients.size);
+
+    // Send all existing changes to the new client
+    if (allChanges.length > 0) {
+      ws.send(
+        JSON.stringify({
+          type: "initial",
+          data: allChanges,
+        })
+      );
+    }
+  },
+  close(ws: any) {
+    clients.delete(ws);
+    console.log("WebSocket client disconnected. Total:", clients.size);
+  },
+},
+```
+
+### Broadcasting Mechanism
+
+From `src/index.ts:12-19`:
+
+```typescript
+// Function to broadcast to all clients
+function broadcast(data: any) {
+  const message = JSON.stringify(data);
+  clients.forEach((client: any) => {
+    if (client.readyState === 1) { // OPEN
+      client.send(message);
+    }
+  });
+}
+```
+
+When a database change is detected, it's broadcast to all connected clients:
+
+```typescript
+// Send to all WebSocket clients
+broadcast({
+  type: "change",
+  data: newChanges,
+  total: allChanges.length,
+});
+```
+
+### Client-Side Implementation
+
+From `src/App.tsx:28-100`, the React client implements robust connection handling:
+
+```typescript
+const connect = () => {
+  // Avoid creating multiple connections
+  if (wsRef.current?.readyState === WebSocket.OPEN || 
+      wsRef.current?.readyState === WebSocket.CONNECTING) {
+    return;
+  }
+
+  // Connect to WebSocket
+  ws = new WebSocket("ws://localhost:3000/ws");
+  wsRef.current = ws;
+
+  ws.onopen = () => {
+    console.log("Connected to WebSocket server");
+    setConnected(true);
+  };
+
+  ws.onmessage = (event) => {
+    const message: WebSocketMessage = JSON.parse(event.data);
+
+    if (message.type === "initial") {
+      // Initial load of all changes
+      setChanges(message.data);
+      setTotalChanges(message.data.length);
+    } else if (message.type === "change") {
+      // New changes - add to state
+      setChanges((prev) => [...prev, ...message.data]);
+      if (message.total) {
+        setTotalChanges(message.total);
+      }
+    }
+  };
+
+  ws.onclose = (event) => {
+    console.log("Disconnected from WebSocket server");
+    setConnected(false);
+    wsRef.current = null;
+
+    // Try to reconnect after 3 seconds
+    if (event.code !== 1000) {
+      reconnectTimeout = setTimeout(() => {
+        connect();
+      }, 3000);
+    }
+  };
+};
+```
+
+## Reconnection Handling
+
+The client automatically reconnects after disconnection:
+
+1. **Detection**: When the WebSocket closes with a non-1000 status code (abnormal closure)
+2. **Delay**: Waits 3 seconds before attempting to reconnect
+3. **Automatic retry**: Calls the `connect()` function again
+4. **State restoration**: Server sends the "initial" message with all accumulated changes
+
+```typescript
+ws.onclose = (event) => {
+  setConnected(false);
+  
+  // Try to reconnect after 3 seconds only if it wasn't an intentional close
+  if (event.code !== 1000 && isMounted) {
+    reconnectTimeout = setTimeout(() => {
+      if (isMounted && (!wsRef.current || wsRef.current.readyState === WebSocket.CLOSED)) {
+        connect();
+      }
+    }, 3000);
+  }
+};
+```
+
+## Connection Lifecycle
+
+1. **Client connects**: WebSocket handshake occurs
+2. **Initial sync**: Server sends all accumulated changes via "initial" message
+3. **Real-time updates**: Server broadcasts "change" messages as they occur
+4. **Disconnection**: Network issues or intentional close
+5. **Automatic reconnect**: Client waits 3 seconds and reconnects
+6. **Re-sync**: Server sends updated "initial" message with all changes
+
+## WebSocket Ready States
+
+The WebSocket connection has four ready states:
+
+- `0` (CONNECTING): Connection is being established
+- `1` (OPEN): Connection is open and ready to communicate
+- `2` (CLOSING): Connection is in the process of closing
+- `3` (CLOSED): Connection is closed or couldn't be opened
+
+The broadcast function only sends to clients in the OPEN state:
+
+```typescript
+if (client.readyState === 1) { // OPEN
+  client.send(message);
+}
+```
+
+## Best Practices
+
+### Avoid Multiple Connections
+
+Check the connection state before creating a new connection:
+
+```javascript
+if (wsRef.current?.readyState === WebSocket.OPEN || 
+    wsRef.current?.readyState === WebSocket.CONNECTING) {
+  return; // Don't create duplicate connection
+}
+```
+
+### Handle JSON Parsing Errors
+
+Always wrap JSON parsing in a try-catch:
+
+```javascript
+ws.onmessage = (event) => {
+  try {
+    const message = JSON.parse(event.data);
+    // Handle message
+  } catch (error) {
+    console.error('Error parsing WebSocket message:', error);
+  }
+};
+```
+
+### Clean Up on Unmount
+
+Always close the WebSocket when your component unmounts:
+
+```javascript
+useEffect(() => {
+  const ws = new WebSocket('ws://localhost:3000/ws');
+  
+  return () => {
+    ws.close(1000, 'Component unmounting');
+  };
+}, []);
+```
+
+### Use Message Types
+
+Always check the message `type` field to handle different message types appropriately:
+
+```javascript
+if (message.type === 'initial') {
+  // Replace entire state with initial data
+  setChanges(message.data);
+} else if (message.type === 'change') {
+  // Append new changes to existing state
+  setChanges((prev) => [...prev, ...message.data]);
+}
+```

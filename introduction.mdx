@@ -1,0 +1,124 @@
+---
+title: Introduction
+description: Real-time monitoring of PostgreSQL database changes using Bun, WebSocket, and React
+---
+
+## What is PostgreSQL Realtime Monitor?
+
+PostgreSQL Realtime Monitor is a lightweight, real-time monitoring tool that streams PostgreSQL database changes directly to your browser. It leverages PostgreSQL's logical replication feature to capture all INSERT, UPDATE, and DELETE operations across your database and displays them instantly in an interactive web interface.
+
+## Key Benefits
+
+- **Real-time visibility** - See database changes as they happen with sub-second latency
+- **Zero polling** - Uses PostgreSQL logical replication and WebSockets for efficient, push-based updates
+- **Universal monitoring** - Automatically captures changes from all tables without configuration
+- **Interactive filtering** - Sort and filter changes by any column to find what you need
+- **Modern UI** - Clean, dark-themed interface with color-coded operations
+- **Lightweight** - Built with Bun for exceptional performance and low resource usage
+
+## Architecture Overview
+
+The application consists of three main components:
+
+### 1. PostgreSQL with Logical Replication
+
+The PostgreSQL database is configured with `wal_level=logical` to enable logical replication. A publication named `alltables` is created to stream all table changes:
+
+```sql
+CREATE PUBLICATION alltables FOR ALL TABLES;
+```
+
+This configuration is automatically set up when you start the database using the provided Docker Compose file.
+
+### 2. Bun Server
+
+The server (src/index.ts:1-125) performs three key functions:
+
+- **PostgreSQL Subscription**: Connects to PostgreSQL using the `postgres` library and subscribes to all changes via the logical replication protocol
+- **WebSocket Broadcasting**: Maintains WebSocket connections with all connected clients and broadcasts changes in real-time
+- **State Management**: Accumulates all changes in memory and provides them to new clients on connection
+
+Key implementation from src/index.ts:
+
+```typescript
+// Subscribe to PostgreSQL changes
+const { unsubscribe } = await sql.subscribe(
+  "*", // pattern: all (all operations and tables)
+  (row, { command, relation }) => {
+    const tableName = typeof relation === "string"
+      ? relation
+      : relation?.table
+        ? `${relation.schema || "public"}.${relation.table}`
+        : JSON.stringify(relation);
+
+    const rows = Array.isArray(row) ? row : [row];
+    const newChanges = rows.map((r) => ({
+      operation: command.toUpperCase(),
+      table: tableName,
+      ...r,
+    }));
+
+    allChanges.push(...newChanges);
+    broadcast({
+      type: "change",
+      data: newChanges,
+      total: allChanges.length,
+    });
+  }
+);
+```
+
+### 3. React Frontend
+
+The frontend (src/App.tsx:1-167) provides an interactive interface featuring:
+
+- **WebSocket Connection**: Automatically connects to the server and handles reconnection
+- **Real-time Updates**: Receives changes via WebSocket and updates the UI instantly
+- **Interactive Table**: Sortable and filterable table component (src/components/ChangesTable.tsx:1-386)
+- **Connection Status**: Visual indicator showing connection state
+
+## Use Cases
+
+### Development & Debugging
+- Monitor database activity during development
+- Debug replication issues and data flow
+- Verify triggers and business logic execution
+
+### Auditing & Compliance
+- Track all data modifications in real-time
+- Audit user actions and system changes
+- Maintain change history for compliance
+
+### Operations & Monitoring
+- Monitor production database activity
+- Detect unusual patterns or anomalies
+- Track performance of batch operations
+
+### Data Integration
+- Monitor data synchronization processes
+- Verify ETL pipeline execution
+- Debug data integration issues
+
+## Features
+
+- Real-time monitoring of INSERT, UPDATE, and DELETE operations
+- WebSocket-based communication for low-latency updates
+- Sortable table columns with ascending/descending order
+- Per-column filtering with case-insensitive search
+- Color-coded operations (green for INSERT, blue for UPDATE, red for DELETE)
+- Automatic reconnection on connection loss
+- Hot Module Reloading (HMR) for fast development
+- Modern dark theme UI with smooth animations
+
+## Technology Stack
+
+- **Runtime**: [Bun](https://bun.sh) - Fast all-in-one JavaScript runtime
+- **Database**: PostgreSQL 16+ with logical replication
+- **Frontend**: React 19 with TypeScript
+- **Database Client**: [postgres](https://github.com/porsager/postgres) library with subscription support
+- **Styling**: Inline CSS with modern design patterns
+- **Containerization**: Docker Compose for easy PostgreSQL setup
+
+<Note>
+  Changes are stored in memory and will be lost when the server restarts. For persistent storage, you would need to implement a separate persistence layer.
+</Note>
